@@ -1,0 +1,21 @@
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development tsx server/index.ts
+
+[1G[0K[2026-03-16T06:41:47.882Z] [INFO] Auth service initialized with 5 demo users
+[2026-03-16T06:41:47.884Z] [WARN] Email service: SMTP not configured. Using development mode.
+[2026-03-16T06:41:47.911Z] [WARN] Missing environment variables
+[2026-03-16T06:41:47.912Z] [INFO] Environment loaded
+Using in-memory storage (database disabled)
+✅ Test data seeded successfully
+6:41:47 AM [express] Test data seeded
+[2026-03-16T06:41:47.927Z] [INFO] Auth routes registered
+[2026-03-16T06:41:47.928Z] [INFO] Email routes registered
+[2026-03-16T06:41:47.929Z] [INFO] Advanced API endpoints registered
+[2026-03-16T06:41:47.929Z] [INFO] Notification API endpoints registered
+[2026-03-16T06:41:47.930Z] [INFO] Orders API endpoints registered
+[2026-03-16T06:41:47.930Z] [INFO] Prescriptions API endpoints registered
+6:41:47 AM [express] Routes registered
+6:41:47 AM [express] ✅ Production System Ready on port 5000
+6:41:47 AM [express] 📊 Analytics API + 📬 Notifications + 📦 Orders + 💊 Prescriptions
+6:41:47 AM [express] 🔐 JWT Auth + 🚀 Rate Limiting + 💾 Caching
