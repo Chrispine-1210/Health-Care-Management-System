@@ -1,0 +1,231 @@
+Thandizo Pharmacy — System Architecture & Functional Specification
+Version: 1.0
+Prepared for: Thandizo Pharmacy
+Prepared by: Chrispine Mndala  - System Design, Development,  maintenance and deployment Specialist (architectural & functional blueprint)
+Date: 2025-11-12
+
+Executive Summary
+A modular, secure, and scalable Pharmacy Management & Retail Ecosystem for Thandizo Pharmaceuticals. The system centralizes multi-branch inventory, prescription and consultation workflows, retail POS operations, delivery logistics with distance-based pricing, and a brand/content hub — all built as independent microservices. The platform prioritizes regulatory compliance, patient safety, offline resilience for low-bandwidth areas, and local payment integrability (Airtel, TNM Mpamba, banks).
+
+Goals & Non-Goals
+Goals
+Build a production-ready, auditable digital platform for pharmacy operations across multiple Thandizo branches.
+Ensure patient safety: prescription audit trails, drug interaction checks, pharmacist approval flows.
+Support retail and e-commerce ordering with delivery (distance-priced) and in-branch POS (offline-capable).
+Provide an admin/content hub for branding, licensing, and regulated public disclosure.
+Scalable architecture for future marketplace and analytics products.
+Non-Goals
+Clinical-level EHR beyond pharmacy, i.e., not replacing hospital-grade EHRs (but integration hooks supported).
+Full regulatory automation with PMRA/MRA (initial release supports exportable reports and reminders; API hooks to integrate later).
+
+Stakeholders
+Thandizo CEO & Board
+Branch Managers (Lilongwe and expansion branches)
+Pharmacists & Pharmacy Assistants
+Sales/Counter Staff
+Delivery Drivers & Logistics Coordinators
+Patients / Customers
+Developers, DevOps, QA, Product Manager
+Regulators: PMRA, MRA (reporting consumers)
+
+Prioritized Deliverables (MVP → v1 → v2)
+MVP (Core) — deployable pilot (2 branches)
+Authentication & RBAC (admin, pharmacist, staff, driver, customer)
+Inventory service with batch & expiry management
+POS web app (local/offline-cache mode)
+Customer mobile app (Android) & web storefront: browse, upload prescription, checkout
+Orders service + basic delivery with distance calculation
+Payment gateway integration (Airtel + TNM Mpamba + bank card placeholder)
+Admin portal: branch & user management, content repository (licenses), stock transfer
+Audit logging & basic encryption
+v1 (growth)
+Teleconsultation (scheduling + basic video via third-party integration)
+Clinical safety module: drug interactions, allergy checks
+Loyalty program & promotions engine
+Advanced analytics (BI dashboards)
+Social embed & automated blog posting
+v2 (scale)
+Marketplaces and partner pharmacy onboarding
+AI prescription OCR & recommender
+Advanced BI, anonymized data services for partners
+Multi-region deployment & regulatory connectors
+
+Architecture Overview
+Architectural Principles
+Microservices (polyrepo): services own data and are independently deployable.
+Event-driven for eventual consistency: use message broker for cross-service events.
+Security-first: encryption at rest/in transit, RBAC, 2FA for sensitive roles.
+Offline-first for POS/mobile: local cache, robust sync and conflict resolution.
+Observability: telemetry for metrics, logs, tracing.
+Component Map
+Clients: Web (Next.js) | Mobile (React Native) | POS Desktop (PWA or Electron)
+API Gateway (Auth, Rate limiting)
+Microservices:
+Auth Service
+Inventory Service
+Orders & POS Service
+Pharmacy/Clinical Service
+Delivery Service
+Telehealth Service
+Branding/Content Service
+Notifications Service
+Analytics Service
+Datastores: Postgres (transactions), MongoDB (documents), Redis (cache), S3 (media)
+Message Broker: Kafka or RabbitMQ
+External Integrations: Payments, Maps, Video/RTC, SMS gateway, Labs
+Infra: Kubernetes, CDN, KMS, Vault
+
+Deployment & Infra
+Kubernetes cluster (EKS/GKE/AKS) with multiple node groups for critical services.
+Separate environments: dev → staging → production.
+Managed Postgres (RDS or CloudSQL) with read replicas and PITR backups.
+Object storage: AWS S3 (or DigitalOcean Spaces/minio for hybrid/local options).
+CI/CD: GitHub Actions or GitLab CI; automated tests, container builds, image registry.
+Secrets: Hashicorp Vault or cloud KMS.
+Monitoring: Prometheus + Grafana, centralized logging (ELK/Opensearch).
+
+Security & Compliance
+TLS everywhere; HSTS;
+AES-256 server-side encryption for sensitive documents (prescriptions, lab results)
+RBAC: roles defined for least privilege; 2FA for admin/pharmacist accounts
+Audit logs persisted and immutable; tamper-evident (append-only storage & cryptographic checksums optional)
+Data retention policy & consent capture for patient data
+Penetration testing and regular security reviews
+
+Data Model (Core Entities)
+(See ERD section; below are condensed model summaries for implementers.)
+Users
+id, role, name, phone, email, hashed_password, branch_id, created_at, profile_data
+Branches
+id, name, address, geo, license_refs, manager_id
+Products
+id, sku, name, generic, manufacturer, prescription_required(bool), tax_rate, default_uom
+StockBatches
+id, product_id, branch_id, batch_no, qty, expiry_date, cost_price, received_at
+Orders & OrderItems
+order id, user_id, branch_id, total, payment_status, delivery_charge, delivery_type
+item: product_id, qty, unit_price, batch_id
+Prescriptions
+id, patient_id, file_url, status, reviewed_by, review_notes
+Appointments & Consultations
+appointment_id, patient_id, practitioner_id, channel, scheduled_at, status
+Deliveries
+id, order_id, driver_id, distance_km, price, pod_url, status
+
+API Surface (Representative Endpoints)
+Gateway prefixes: /api/v1
+Auth Service
+POST /auth/login → tokens
+POST /auth/register → create user
+POST /auth/2fa/verify
+GET /auth/me
+Inventory Service
+GET /branches/{id}/stock → stock snapshot
+POST /stock/batch → receive batch
+POST /stock/transfer → branch-to-branch
+GET /products/{id}/availability
+Orders Service
+POST /orders → place order
+GET /orders/{id} → order status
+POST /orders/{id}/pay → payment callback
+PATCH /orders/{id}/status
+Pharmacy Service
+POST /prescriptions/upload
+GET /prescriptions/{id}
+POST /prescriptions/{id}/review → pharmacist action
+GET /clinical/check-interactions?items=[..]
+Delivery Service
+POST /deliveries/estimate (origin, dest, weight)
+POST /deliveries/assign
+PATCH /deliveries/{id}/status
+Content Service
+POST /content → create blog/article
+GET /content/{slug}
+POST /media/upload
+Analytics Service
+GET /analytics/sales?branch=&from=&to=
+GET /analytics/stock-turnover
+
+Integration Patterns
+Payments: asynchronous webhooks; idempotency keys; retry & reconciliation jobs
+Maps & Routing: Google Maps or OpenRouteService; pre-compute distance matrix for delivery pricing
+Telehealth video: use Twilio / Daily.co / Jitsi or REST-RTC provider with token gateway
+SMS / OTP: integrate local SMS gateway (provider with Malawi coverage)
+Social auto-post: tokenized integration with Facebook and Instagram Graph APIs
+
+Offline & Sync Design (POS and Mobile)
+POS & mobile maintain a local SQLite cache with change journal.
+Sync worker: pushes local events (orders, stock movements) to central queue when online.
+Conflict resolution: "last write wins" for non-critical UI data; inventory conflicts resolved by server reconciliation with human review if necessary.
+Staleness indicators: UI shows time-of-last-sync and warns staff when stock possibly stale.
+
+Pharmacy Clinical Workflows
+Prescription Fulfilment
+Customer uploads prescription via app or hands physical copy to branch staff.
+System creates prescription record with file stored in encrypted media store.
+Pharmacist assigned reviews and checks interaction/allergy module.
+Pharmacist approves and creates a dispense order; stock batches are reserved.
+Order fulfilled and delivered or picked up; prescription status updated; audit logged.
+Doctor Teleconsult & e-Prescription
+Patient schedules consultation (tele/in-person).
+Practitioner consults via video and issues e-prescription linked to patient file.
+Prescription available to nearest Thandizo branch for fulfilment or for delivery ordering.
+
+UX / UI Considerations
+Clean, trust-focused visual language (white + brand colors), legible fonts, large CTAs for ordering/refill.
+Accessibility: high contrast, readable sizes, simple flows for older patients.
+Admin UX: dense dashboards, advanced filters, clear audit & approval workflows.
+Editor: WYSIWYG with template library, SEO metadata, scheduling & preview modes.
+
+Testing Strategy
+Unit tests for services, integration tests for cross-service flows, end-to-end tests for main journeys (order → pay → deliver).
+Security tests: OWASP Top 10 checks, static code analysis, dynamic scanning.
+Performance testing: simulate peak branch load, massive order bursts, and slow networks (for offline flow validation).
+
+Monitoring & SLOs
+SLOs examples: POS sync within 5s (90%), order placement latency < 2s, payments webhook processing < 5s.
+Alerts for: high error rates, delivery failures, stock-negative events, sync backlog growth.
+
+Operational Runbook (summary)
+Branch onboarding checklist (licenses, contact, opening stock, manager assignment).
+Incident response: severity levels, communication channels (WhatsApp alert + email + dashboard incident ticket).
+Backup & restore: daily DB backups + weekly full snapshot + tested restore quarterly.
+
+Governance & Data Policy
+Data classification (public, internal, sensitive PHI).
+Retention durations: orders/invoices (7 years, tax), prescriptions (configurable, law-dependent), clinical notes (configurable).
+Consent capture UI for marketing and data sharing.
+
+Team & Roles (for delivery)
+Product Owner (Thandizo representative)
+Solution Architect
+2–3 Backend Engineers (microservices)
+2 Frontend Engineers (web + mobile)
+1 DevOps / SRE
+1 QA Engineer
+1 UI/UX Designer
+1 Business Analyst / Medical Compliance Advisor
+
+Estimated Budget Ranges (high-level)
+MVP build (8–12 weeks core dev): dev team cost + infra + integrations ≈ variable depending on rates (provide estimate if you want a detailed costing by local/regional staffing).
+Ongoing infra & maintenance: monthly cloud & monitoring costs + team support.
+
+Roadmap & Milestones (detailed)
+Phase 0 (weeks 0–2): Kickoff, requirements, security & compliance mapping, wireframes. Phase 1 (weeks 3–10): Auth, Inventory, Orders, POS web, Order flow, simple admin. Phase 2 (weeks 11–18): Mobile app, Payments integration, Delivery service, Branding hub. Phase 3 (weeks 19–28): Clinical safety module, Telehealth, Loyalty engine, Analytics. Phase 4 (weeks 29–40): Hardening, scale, pilot expansion, integration with partners.
+
+Acceptance Criteria (sample user stories)
+Story: Upload and fulfil prescription
+Given a registered patient, when they upload a prescription file, the system must create a prescription record and store file encrypted; a pharmacist must be notified; pharmacist must be able to review and mark approved or rejected; upon approval, an order is created reserving stock.
+Story: Place an order with delivery
+Given user selects items and enters address, when they choose delivery, system must compute delivery charge using distance matrix and show ETA; user must be able to pay; order must be assigned to driver and trackable.
+Story: Offline POS record
+Given POS is offline, sales must be accepted, assigned a temporary local id, and queued; when network returns, queued sales must sync and reconcile with central stock; system must avoid double-selling reserved batches.
+
+ERD (summary - developer friendly)
+See Core Entities (Users, Branches, Products, StockBatches, Orders, OrderItems, Prescriptions, Appointments, Deliveries, ContentItems, AuditLogs).
+Indexing strategy: product.sku, stock_batches.expiry_date, orders.created_at, prescriptions.status.
+
+This document is designed to be handed to developers and investors. It balances speed to market (MVP) with a robust, secure foundation aligned to Thandizo Pharmacy’s regulatory and operational constraints in Malawi. The next step is to pick one of the immediate actions above for me to create now.
+
+End of specification v1.0
+

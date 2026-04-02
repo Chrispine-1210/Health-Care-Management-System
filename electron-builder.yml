@@ -1,0 +1,42 @@
+appId: com.thandizo.pharmacy
+productName: Thandizo Pharmacy
+directories:
+  buildResources: client/public
+  output: dist/electron
+files:
+  - dist/electron-main.js
+  - dist/preload.js
+  - dist/public/**/*
+  - node_modules/**/*
+win:
+  target:
+    - nsis
+    - portable
+  certificateFile: null
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.medical
+  hardenedRuntime: true
+dmg:
+  contents:
+    - x: 110
+      y: 150
+      type: file
+    - x: 240
+      y: 150
+      type: link
+      path: /Applications
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Medical
+publish:
+  provider: github

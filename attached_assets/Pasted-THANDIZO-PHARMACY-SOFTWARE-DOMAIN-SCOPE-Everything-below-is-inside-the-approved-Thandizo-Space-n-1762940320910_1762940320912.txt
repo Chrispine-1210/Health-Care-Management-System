@@ -1,0 +1,102 @@
+THANDIZO PHARMACY SOFTWARE DOMAIN SCOPE
+Everything below is inside the approved “Thandizo Space” — nothing outside this ecosystem.
+
+1. Pharmacy Operations Core
+Purpose: Handle all prescription, dispensing, and stock operations across all Thandizo outlets.
+Modules:
+Prescription Management – create, upload (scan), validate, and fulfil prescriptions.
+Dispensing Workflow – pharmacist validation, dosage tracking, substitution, expiry checks.
+Drug Catalogue & Inventory – complete product database: batch, expiry, supplier, storage condition.
+Stock Movement Tracking – between branches, from supplier to store, or returns.
+Automated Reordering – reorder triggers when stock hits threshold.
+Drug Interaction/Allergy Alerts – real-time warnings to avoid dispensing errors.
+
+2. Retail & Point-of-Sale (POS)
+Purpose: Manage walk-in sales, billing, and financial reconciliation.
+Modules:
+Multi-branch POS with local and online modes (works even if internet drops).
+Integrated pricing engine with promotions, discounts, and loyalty points.
+Accepts cash, mobile money (Airtel, Mpamba), POS cards, digital wallets.
+Generates e-invoices, receipts, and tax-compliant reports (MRA-ready).
+Real-time sync with central server for analytics and stock updates.
+
+3. Patient & Customer Portal
+Purpose: Empower patients and regular customers to manage their health and orders.
+Modules:
+Secure registration & health profile (medications, allergies, chronic conditions).
+Order prescription drugs or OTC medicines online.
+Request consultations (video/audio or in-pharmacy).
+Receive refill reminders & medication adherence alerts.
+Access medical summaries, invoices, loyalty points, and delivery status.
+Social engagement (likes, comments, health blog interactions).
+
+4. Consultation & Clinical Services
+Purpose: Enable virtual or in-person medical advice and prescription generation.
+Modules:
+Video/Chat consultation between doctor/pharmacist and patient.
+Prescription auto-generation tied to the pharmacy inventory.
+Doctor verification and licensing checks before prescribing.
+Patient record & consultation logs (immutable and auditable).
+Integration with lab results and referral management.
+
+5. Delivery & Logistics
+Purpose: Manage last-mile delivery of medicines and services.
+Modules:
+Geo-location-based delivery management.
+Distance-based cost computation (auto).
+Delivery agent app (accept/reject tasks, mark delivered, get payment).
+Real-time tracking, proof of delivery (signature/photo).
+Delivery performance analytics.
+
+6. Branding, Communication & Marketing Hub
+Purpose: Build and control the Thandizo digital identity across all platforms.
+Modules:
+Central Brand Portal — houses logos, certificates, licenses, brand guidelines, accreditations.
+Blog & News System — health articles, public awareness, auto-post to social media.
+Social Embed Engine — posts automatically sync from Facebook, Instagram, X (Twitter).
+Editor Tools — advanced WYSIWYG editor for text, color, font, layout, media embeds.
+SEO optimization for all content.
+Campaign management (email/SMS/WhatsApp push).
+
+7. Regulatory & Compliance
+Purpose: Maintain trust, traceability, and legal protection.
+Modules:
+Store and track all pharmacy, medical, and corporate licenses.
+Expiry alerts for licenses, pharmacist registration, and insurance.
+Digital audit trail for every transaction, prescription, or consultation.
+Role-based data access (strict segregation: admin vs pharmacist vs customer).
+Integration hooks for PMRA, MRA, and future e-health regulations.
+Data privacy controls (GDPR & Malawi equivalent compliance).
+
+8. Administration & Enterprise Control
+Purpose: Empower head office to control all multi-branch operations centrally.
+Modules:
+Super-admin dashboard — complete system visibility.
+Branch setup, staff assignment, access control, permissions.
+User management (roles, groups, departments, pharmacies, riders).
+File manager for photos, videos, docs, reports, certificates, product images.
+Data-driven performance dashboard — sales, stock turnover, delivery efficiency.
+Content publishing approval workflows.
+Security monitoring and backup management.
+
+9. Analytics & Business Intelligence
+Purpose: Turn operations into strategic insights.
+Modules:
+Predictive analytics: forecast demand, optimize purchasing, avoid stockouts.
+Drug consumption trend analysis (by region, age, season).
+Profitability tracking per product/branch.
+Customer retention, loyalty tracking, and churn prediction.
+Power BI or in-app dashboards with exportable visual reports.
+
+10. Technology Infrastructure
+Purpose: Ensure scalability, performance, and high availability.
+Architecture:
+Microservices-based (no monorepo).
+Frontend: React or Vue. Backend: Node.js + Express or NestJS.
+Database: PostgreSQL + Redis cache.
+Cloud: AWS/Azure hybrid with CDN + regional data redundancy.
+Message queue (RabbitMQ/Kafka) for orders and notifications.
+Storage: S3-compatible for media, PDFs, and documents.
+CI/CD for continuous deployment and updates.
+API gateway for third-party integrations.
+Ai integration 
