@@ -8,18 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Trash2, Plus, Minus, ArrowLeft, ShoppingCart } from "lucide-react";
 
 export default function CartPage() {
-  const { isAuthenticated, isCustomer } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { items, removeItem, updateQuantity, clearCart, getTotalPrice } = useCart();
   const deliveryFee = 500; // MK base fee (will add distance multiplier in checkout)
   const subtotal = getTotalPrice();
   const total = subtotal + deliveryFee;
 
-  if (!isAuthenticated || !isCustomer) {
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-background">
         <CustomerNav />
         <div className="container mx-auto px-4 py-8 text-center">
-          <p className="text-muted-foreground">Only customers can view a shopping cart.</p>
+          <p className="text-muted-foreground">Please log in to view your cart</p>
         </div>
       </div>
     );

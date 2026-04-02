@@ -1,141 +1,62 @@
-import { useEffect, useMemo } from "react";
-import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import type { Appointment, Delivery, Order, Prescription, Product } from "@shared/schema";
-import { CustomerNav } from "@/components/CustomerNav";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
+import { CustomerNav } from "@/components/CustomerNav";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { OrderTrackingProgress } from "@/components/OrderTrackingProgress";
-import { RoleWorkspacePanel } from "@/components/RoleWorkspacePanel";
-import { DashboardShell } from "@/components/dashboard/DashboardShell";
-import { MetricCard } from "@/components/dashboard/MetricCard";
-import {
-  CalendarDays,
-  FileText,
-  Package,
-  Pill,
-  ShoppingCart,
-  Truck,
-} from "lucide-react";
-
-type ManagedOrder = Order & {
-  delivery?: Delivery | null;
-};
-
-const activeDeliveryStatuses = ["confirmed", "processing", "ready", "in_transit"];
-
-function getOrderStatusBadge(status: string) {
-  switch (status) {
-    case "pending":
-      return <Badge className="bg-amber-500">Pending</Badge>;
-    case "confirmed":
-      return <Badge className="bg-sky-600">Confirmed</Badge>;
-    case "processing":
-      return <Badge className="bg-blue-600">Processing</Badge>;
-    case "ready":
-      return <Badge className="bg-violet-600">Ready</Badge>;
-    case "in_transit":
-      return <Badge className="bg-emerald-600">In Transit</Badge>;
-    case "delivered":
-      return <Badge variant="outline">Delivered</Badge>;
-    case "cancelled":
-      return <Badge variant="destructive">Cancelled</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
+import { ShoppingCart, FileText, Package, Phone, Plus, Truck, MapPin, Search } from "lucide-react";
+import type { Product, User } from "@shared/schema";
 
 export default function CustomerHome() {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [, setLocation] = useLocation();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       toast({
         title: "Unauthorized",
-        description: "You are logged out. Redirecting to sign in.",
+        description: "You are logged out. Logging in again...",
         variant: "destructive",
       });
       setTimeout(() => {
-        setLocation("/login");
+        window.location.href = "/api/login";
       }, 500);
     }
-  }, [authLoading, isAuthenticated, setLocation, toast]);
+  }, [isAuthenticated, authLoading, toast]);
 
-  const { data: products = [], isLoading: productsLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
+  const { data: featuredProducts, isLoading: productsLoading } = useQuery<Product[]>({
+    queryKey: ["/api/products/featured"],
     enabled: isAuthenticated,
-    refetchInterval: 60000,
   });
 
-  const { data: orders = [], isLoading: ordersLoading } = useQuery<ManagedOrder[]>({
+  const { data: activeDrivers, isLoading: driversLoading } = useQuery<(User & { activeDeliveries: number })[]>({
+    queryKey: ["/api/drivers/active"],
+    enabled: isAuthenticated,
+  });
+
+  const { data: myOrders } = useQuery({
     queryKey: ["/api/orders"],
     enabled: isAuthenticated,
-    refetchInterval: 10000,
   });
 
-  const { data: prescriptions = [], isLoading: prescriptionsLoading } = useQuery<Prescription[]>({
-    queryKey: ["/api/prescriptions/patient", user?.id],
-    enabled: isAuthenticated && !authLoading && !!user?.id,
-    refetchInterval: 15000,
-  });
-
-  const { data: appointments = [], isLoading: appointmentsLoading } = useQuery<Appointment[]>({
-    queryKey: ["/api/appointments/patient", user?.id],
-    enabled: isAuthenticated && !authLoading && !!user?.id,
-    refetchInterval: 15000,
-  });
-
-  const approvedMedicines = useMemo(
-    () => products.filter((product) => product.isActive),
-    [products],
-  );
-
-  const activeOrders = useMemo(
-    () => orders.filter((order) => activeDeliveryStatuses.includes(order.status)),
-    [orders],
-  );
-
-  const recentPrescriptions = useMemo(
-    () =>
-      [...prescriptions]
-        .sort(
-          (left, right) =>
-            new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime(),
-        )
-        .slice(0, 3),
-    [prescriptions],
-  );
-
-  const upcomingConsultations = useMemo(
-    () =>
-      [...appointments]
-        .filter((appointment) =>
-          ["scheduled", "confirmed", "in_progress"].includes(appointment.status),
-        )
-        .sort(
-          (left, right) =>
-            new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime(),
-        )
-        .slice(0, 3),
-    [appointments],
+  const filteredProducts = useMemo(
+    () => featuredProducts?.filter(p =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.genericName?.toLowerCase().includes(searchQuery.toLowerCase())
+    ) || [],
+    [featuredProducts, searchQuery]
   );
 
   if (authLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      <div className="h-screen flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
       </div>
     );
   }
@@ -143,258 +64,207 @@ export default function CustomerHome() {
   return (
     <div className="min-h-screen bg-background">
       <CustomerNav />
-
+      
       <main className="container mx-auto px-4 py-8">
-        <DashboardShell
-          role="Customer"
-          title="Care and Delivery Dashboard"
-          description="Browse approved medicines, upload prescriptions securely, track deliveries in real time, and book pharmacist consultations from one place."
-          actions={(
-            <>
-              <Button onClick={() => setLocation("/customer/shop")}>
-                <ShoppingCart className="mr-2 h-4 w-4" />
-                Browse Medicines
-              </Button>
-              <Button variant="outline" onClick={() => setLocation("/customer/prescriptions")}>
-                <FileText className="mr-2 h-4 w-4" />
-                Upload Prescription
-              </Button>
-              <Button variant="outline" onClick={() => setLocation("/customer/consultations")}>
-                <CalendarDays className="mr-2 h-4 w-4" />
-                Book Consultation
-              </Button>
-            </>
-          )}
-        >
-          <RoleWorkspacePanel
-            role="customer"
-            title="Customer Routes"
-            description="Move quickly between the dashboard, medicines, prescriptions, orders, consultations, and profile tools built for customers."
-            excludeKeys={["dashboard"]}
-            limit={6}
-          />
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            title="Approved Medicines"
-            value={approvedMedicines.length}
-            description="Available catalog items ready to browse and order"
-            tone="info"
-          />
-          <MetricCard
-            title="Prescription Uploads"
-            value={prescriptions.length}
-            description="Secure prescription records linked to your account"
-            tone="warning"
-          />
-          <MetricCard
-            title="Active Deliveries"
-            value={activeOrders.length}
-            description="Orders currently moving through preparation or delivery"
-            tone="success"
-          />
-          <MetricCard
-            title="Consultations"
-            value={upcomingConsultations.length}
-            description="Upcoming pharmacist consultations already booked"
-            tone="info"
-          />
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2">Welcome to Thandizo Pharmacy</h1>
+          <p className="text-muted-foreground">Your trusted healthcare partner in Malawi</p>
+          <p className="text-muted-foreground text-sm mt-2">Browse medications, manage prescriptions, and track your orders</p>
         </div>
 
-        <div className="mt-8 grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Real-Time Delivery Tracking</CardTitle>
-              <CardDescription>
-                Follow active orders as they move from pharmacy review into dispatch and delivery.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {ordersLoading ? (
-                Array.from({ length: 3 }).map((_, index) => (
-                  <Skeleton key={index} className="h-28 w-full" />
-                ))
-              ) : activeOrders.length > 0 ? (
-                activeOrders.slice(0, 4).map((order) => (
-                  <div key={order.id} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold">Order #{order.id.slice(0, 8)}</p>
-                          {getOrderStatusBadge(order.status)}
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Truck className="h-4 w-4" />
-                            <span>{order.deliveryAddress || "Counter collection"}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Package className="h-4 w-4" />
-                            <span>MK {Number(order.total || 0).toLocaleString()}</span>
-                          </div>
-                        </div>
-                        <OrderTrackingProgress
-                          status={order.status}
-                          deliveryDistance={order.deliveryDistance}
-                          deliveryAddress={order.deliveryAddress}
-                          deliveryNotes={order.delivery?.deliveryNotes}
-                        />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <a href="/shop">
+            <Card className="hover-elevate active-elevate-2 cursor-pointer" data-testid="card-shop">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Shop Medications</CardTitle>
+                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">Browse</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  View our full catalog
+                </p>
+              </CardContent>
+            </Card>
+          </a>
+
+          <a href="/prescriptions">
+            <Card className="hover-elevate active-elevate-2 cursor-pointer" data-testid="card-prescriptions">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">My Prescriptions</CardTitle>
+                <FileText className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">Manage</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Upload & track prescriptions
+                </p>
+              </CardContent>
+            </Card>
+          </a>
+
+          <a href="/orders">
+            <Card className="hover-elevate active-elevate-2 cursor-pointer" data-testid="card-orders">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">My Orders</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">Track</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  View order history
+                </p>
+              </CardContent>
+            </Card>
+          </a>
+
+          <a href="/consultations">
+            <Card className="hover-elevate active-elevate-2 cursor-pointer" data-testid="card-consult">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Consultations</CardTitle>
+                <Phone className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">Book</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Talk to a pharmacist
+                </p>
+              </CardContent>
+            </Card>
+          </a>
+        </div>
+
+        {/* Active Drivers Section */}
+        <div className="mb-12">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-semibold">Available Delivery Drivers</h2>
+              <p className="text-sm text-muted-foreground mt-1">Track drivers delivering your orders</p>
+            </div>
+          </div>
+
+          {driversLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-32 rounded-lg" />
+              ))}
+            </div>
+          ) : activeDrivers && activeDrivers.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {activeDrivers.slice(0, 4).map((driver) => (
+                <Card key={driver.id} className="hover-elevate active-elevate-2" data-testid={`driver-card-${driver.id}`}>
+                  <CardContent className="pt-6">
+                    <div className="flex items-start gap-3 mb-4">
+                      <Avatar className="h-12 w-12">
+                        <AvatarFallback className="bg-primary text-primary-foreground">
+                          {driver.firstName?.[0] || 'D'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <p className="font-semibold text-sm">
+                          {driver.firstName} {driver.lastName}
+                        </p>
+                        <Badge variant="secondary" className="text-xs mt-1">
+                          <Truck className="w-3 h-3 mr-1" />
+                          {driver.activeDeliveries} active
+                        </Badge>
                       </div>
-                      <Button variant="outline" onClick={() => setLocation(`/customer/orders/${order.id}`)}>
-                        Track Order
-                        </Button>
                     </div>
-                  </div>
+                    {driver.phone && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                        <Phone className="w-3 h-3" />
+                        <span>{driver.phone}</span>
+                      </div>
+                    )}
+                    <div className="text-xs text-muted-foreground">
+                      <p>Ready for deliveries</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center text-muted-foreground">No drivers available at the moment</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-semibold">Popular Medications</h2>
+              <p className="text-sm text-muted-foreground mt-1">Frequently ordered items</p>
+            </div>
+            <a href="/shop">
+              <Button data-testid="button-view-all">View All</Button>
+            </a>
+          </div>
+
+          {productsLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((i) => (
+                <Card key={i}>
+                  <CardHeader>
+                    <Skeleton className="h-48 w-full" />
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                    <Skeleton className="h-6 w-1/3" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {featuredProducts && featuredProducts.length > 0 ? (
+                featuredProducts.slice(0, 4).map((product) => (
+                  <Card key={product.id} className="hover-elevate active-elevate-2" data-testid={`card-product-${product.id}`}>
+                    <CardHeader className="p-0">
+                      <div className="aspect-square bg-muted rounded-t-lg flex items-center justify-center relative overflow-hidden">
+                        {product.imageUrl ? (
+                          <img src={product.imageUrl} alt={product.name} className="object-cover w-full h-full" />
+                        ) : (
+                          <Package className="w-16 h-16 text-muted-foreground" />
+                        )}
+                        {product.prescriptionRequired && (
+                          <Badge className="absolute top-2 right-2 bg-destructive text-destructive-foreground">
+                            Rx
+                          </Badge>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-4">
+                      <h3 className="font-semibold text-lg line-clamp-2 mb-1">{product.name}</h3>
+                      {product.genericName && (
+                        <p className="text-sm text-muted-foreground mb-2">{product.genericName}</p>
+                      )}
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xl font-bold text-primary">
+                          MK {parseFloat(product.price).toFixed(2)}
+                        </span>
+                      </div>
+                      <a href="/shop" className="w-full block">
+                        <Button className="w-full" size="sm" data-testid={`button-add-to-cart-${product.id}`}>
+                          <Plus className="w-4 h-4 mr-1" />
+                          Shop Now
+                        </Button>
+                      </a>
+                    </CardContent>
+                  </Card>
                 ))
               ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Truck className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No active deliveries yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Once you place an order, live preparation and delivery updates will appear here.
-                  </p>
+                <div className="col-span-full text-center py-12">
+                  <Package className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground">No products available at the moment</p>
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Prescription Workspace</CardTitle>
-                <CardDescription>
-                  Upload prescriptions securely and keep track of pharmacist review decisions.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {prescriptionsLoading ? (
-                  Array.from({ length: 2 }).map((_, index) => (
-                    <Skeleton key={index} className="h-20 w-full" />
-                  ))
-                ) : recentPrescriptions.length > 0 ? (
-                  recentPrescriptions.map((prescription) => (
-                    <div key={prescription.id} className="rounded-xl border p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-medium">Prescription #{prescription.id.slice(0, 8)}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Uploaded {new Date(prescription.createdAt || Date.now()).toLocaleString()}
-                          </p>
-                        </div>
-                        <Badge variant="outline">
-                          {prescription.status.replace(/_/g, " ")}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No prescriptions uploaded yet. Secure uploads will appear here after submission.
-                  </p>
-                )}
-                <Button className="w-full" onClick={() => setLocation("/customer/prescriptions")}>
-                  Open Prescriptions
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Pharmacist Consultations</CardTitle>
-                <CardDescription>
-                  Book and manage consultations for medicine guidance and follow-up care.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {appointmentsLoading ? (
-                  Array.from({ length: 2 }).map((_, index) => (
-                    <Skeleton key={index} className="h-20 w-full" />
-                  ))
-                ) : upcomingConsultations.length > 0 ? (
-                  upcomingConsultations.map((appointment) => (
-                    <div key={appointment.id} className="rounded-xl border p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-medium capitalize">{appointment.type} consultation</p>
-                          <p className="text-sm text-muted-foreground">
-                            {new Date(appointment.scheduledAt).toLocaleString()}
-                          </p>
-                        </div>
-                        <Badge variant="outline">
-                          {appointment.status.replace(/_/g, " ")}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No consultations booked yet. Schedule a session with a pharmacist when you need help.
-                  </p>
-                )}
-                <Button className="w-full" variant="outline" onClick={() => setLocation("/customer/consultations")}>
-                  Manage Consultations
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        <Card className="mt-8">
-          <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle>Approved Medicines</CardTitle>
-              <CardDescription>
-                Browse active medicines approved for listing and available in the pharmacy catalog.
-              </CardDescription>
             </div>
-            <Button variant="outline" onClick={() => setLocation("/customer/shop")}>
-              View Full Catalog
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {productsLoading ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <Skeleton key={index} className="h-48 w-full" />
-                ))}
-              </div>
-            ) : approvedMedicines.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {approvedMedicines.slice(0, 4).map((product) => (
-                  <div key={product.id} className="rounded-xl border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold">{product.name}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {product.genericName || product.category || "Approved medicine"}
-                        </p>
-                      </div>
-                      <Pill className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <div className="mt-4 flex items-center justify-between">
-                      <span className="text-lg font-bold text-primary">
-                        MK {Number(product.price).toLocaleString()}
-                      </span>
-                      {product.prescriptionRequired && <Badge variant="outline">Prescription</Badge>}
-                    </div>
-                    <Button className="mt-4 w-full" size="sm" onClick={() => setLocation("/customer/shop")}>
-                      Browse Product
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <Pill className="mx-auto mb-3 h-8 w-8 text-primary" />
-                <p className="font-medium">No approved medicines are visible right now</p>
-                <p className="text-sm text-muted-foreground">
-                  Available medicines will appear here as soon as the catalog is ready.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        </DashboardShell>
+          )}
+        </div>
       </main>
     </div>
   );

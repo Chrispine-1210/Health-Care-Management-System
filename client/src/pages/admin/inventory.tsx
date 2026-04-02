@@ -1,29 +1,13 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Branch, Product, StockBatch } from "@shared/schema";
-import { format } from "date-fns";
-import { Package, Plus, Search } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { useEffect, useMemo, useCallback } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -32,450 +16,243 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AlertTriangle, Package, Plus, Search } from "lucide-react";
+import { format } from "date-fns";
+import type { StockBatch, Product, Branch } from "@shared/schema";
 
 type StockBatchWithDetails = StockBatch & {
   product: Product;
   branch: Branch;
 };
 
-type BatchFormState = {
-  productId: string;
-  branchId: string;
-  batchNumber: string;
-  quantity: string;
-  expiryDate: string;
-  costPrice: string;
-  supplierName: string;
-};
-
-const emptyForm: BatchFormState = {
-  productId: "",
-  branchId: "",
-  batchNumber: "",
-  quantity: "",
-  expiryDate: "",
-  costPrice: "",
-  supplierName: "",
-};
-
 export default function AdminInventory() {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const { isAdmin, isAuthenticated, isLoading: authLoading } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [selectedBranchId, setSelectedBranchId] = useState("");
-  const [form, setForm] = useState<BatchFormState>(emptyForm);
 
-  const { data: stockBatches = [], isLoading } = useQuery<StockBatchWithDetails[]>({
-    queryKey: ["/api/admin/inventory", selectedBranchId],
-    queryFn: async () => {
-      const params = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : "";
-      const res = await apiRequest("GET", `/api/admin/inventory${params}`);
-      return res.json();
-    },
-  });
-
-  const { data: products = [] } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
-  });
-
-  const { data: branches = [] } = useQuery<Branch[]>({
-    queryKey: ["/api/admin/branches"],
-  });
-
-  const createBatchMutation = useMutation({
-    mutationFn: (payload: BatchFormState) =>
-      apiRequest("POST", "/api/admin/inventory/batch", {
-        productId: payload.productId,
-        branchId: payload.branchId,
-        batchNumber: payload.batchNumber,
-        quantity: Number(payload.quantity),
-        expiryDate: new Date(payload.expiryDate).toISOString(),
-        costPrice: payload.costPrice,
-        supplierName: payload.supplierName || null,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/admin/inventory"] });
-      setOpen(false);
-      setForm((current) => ({
-        ...emptyForm,
-        branchId: current.branchId || selectedBranchId,
-      }));
+  useEffect(() => {
+    if (!authLoading && (!isAuthenticated || !isAdmin)) {
       toast({
-        title: "Stock batch received",
-        description: "Inventory oversight has been updated with the new batch.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Receive stock failed",
-        description: error.message,
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
         variant: "destructive",
       });
-    },
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+    }
+  }, [isAuthenticated, isAdmin, authLoading, toast]);
+
+  const { data: stockBatches, isLoading: batchesLoading } = useQuery<StockBatchWithDetails[]>({
+    queryKey: ["/api/admin/inventory"],
+    enabled: isAuthenticated && isAdmin,
   });
 
+  const getExpiryStatus = useCallback((expiryDate: Date) => {
+    const now = new Date();
+    const expiry = new Date(expiryDate);
+    const daysUntilExpiry = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilExpiry < 0) {
+      return { label: "Expired", className: "bg-destructive text-destructive-foreground" };
+    } else if (daysUntilExpiry <= 7) {
+      return { label: "Critical", className: "bg-destructive text-destructive-foreground" };
+    } else if (daysUntilExpiry <= 30) {
+      return { label: "Warning", className: "bg-chart-3 text-white" };
+    } else if (daysUntilExpiry <= 90) {
+      return { label: "Caution", className: "bg-chart-4 text-white" };
+    }
+    return null;
+  }, []);
+
+  const getStockStatus = useCallback((quantity: number) => {
+    if (quantity === 0) {
+      return { label: "Out of Stock", className: "bg-destructive text-destructive-foreground" };
+    } else if (quantity <= 10) {
+      return { label: "Low Stock", className: "bg-chart-3 text-white" };
+    }
+    return null;
+  }, []);
+
   const filteredBatches = useMemo(
-    () =>
-      stockBatches.filter((batch) => {
-        const query = searchQuery.toLowerCase();
-        return (
-          batch.product?.name?.toLowerCase().includes(query) ||
-          batch.branch?.name?.toLowerCase().includes(query) ||
-          batch.batchNumber?.toLowerCase().includes(query)
-        );
-      }),
-    [searchQuery, stockBatches],
+    () => stockBatches?.filter(batch =>
+      batch.product?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      batch.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      batch.batchNumber?.toLowerCase().includes(searchQuery.toLowerCase())
+    ) || [],
+    [stockBatches, searchQuery]
   );
 
-  const now = new Date();
-
-  const expiringSoon = useMemo(() => {
-    const threshold = new Date();
-    threshold.setMonth(threshold.getMonth() + 3);
-    return stockBatches.filter((batch) => {
-      const expiryDate = new Date(batch.expiryDate);
-      return expiryDate >= now && expiryDate <= threshold;
-    });
-  }, [stockBatches]);
-
-  const expired = useMemo(
-    () => stockBatches.filter((batch) => new Date(batch.expiryDate) < now),
-    [now, stockBatches],
+  const criticalItems = useMemo(
+    () => stockBatches?.filter(b => {
+      const status = getExpiryStatus(b.expiryDate);
+      return status?.label === "Expired" || status?.label === "Critical";
+    }) || [],
+    [stockBatches, getExpiryStatus]
   );
 
-  const lowStock = useMemo(
-    () => stockBatches.filter((batch) => batch.quantity <= 10),
-    [stockBatches],
-  );
-
-  const criticalAttention = useMemo(
-    () =>
-      stockBatches.filter((batch) => {
-        const expiryDate = new Date(batch.expiryDate);
-        const threshold = new Date();
-        threshold.setMonth(threshold.getMonth() + 3);
-        return batch.quantity <= 10 || expiryDate < now || (expiryDate >= now && expiryDate <= threshold);
-      }),
-    [now, stockBatches],
-  );
-
-  const isFormValid =
-    Boolean(form.productId) &&
-    Boolean(form.branchId) &&
-    Boolean(form.batchNumber.trim()) &&
-    Boolean(form.quantity) &&
-    Boolean(form.expiryDate) &&
-    Boolean(form.costPrice.trim());
-
-  if (isLoading) {
-    return <div>Loading inventory...</div>;
+  if (authLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Inventory Control</h1>
-          <p className="text-muted-foreground">
-            Monitor stock levels, receive new batches, and protect branch inventory quality across
-            the full platform.
-          </p>
+          <h1 className="text-3xl font-bold mb-2">Inventory Management</h1>
+          <p className="text-muted-foreground">Monitor stock levels, batches, and expiry dates across all branches</p>
         </div>
-        <Button onClick={() => setOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
+        <Button data-testid="button-receive-stock">
+          <Plus className="h-4 w-4 mr-2" />
           Receive Stock
         </Button>
       </div>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-2">
-          <Label htmlFor="branch-filter">Branch</Label>
-          <select
-            id="branch-filter"
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-            value={selectedBranchId}
-            onChange={(event) => setSelectedBranchId(event.target.value)}
-          >
-            <option value="">All branches</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Showing {selectedBranchId ? "selected branch" : "all branches"} inventory.
-        </p>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Tracked Batches</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Batches</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{stockBatches.length}</div>
+            <div className="text-2xl font-bold">{stockBatches?.length || 0}</div>
           </CardContent>
         </Card>
+
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-chart-3" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-amber-600">{lowStock.length}</div>
+            <div className="text-2xl font-bold text-chart-3">
+              {stockBatches?.filter(b => b.quantity <= 10).length || 0}
+            </div>
           </CardContent>
         </Card>
+
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Expiring Soon</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-chart-3" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-sky-600">{expiringSoon.length}</div>
+            <div className="text-2xl font-bold text-chart-3">
+              {stockBatches?.filter(b => {
+                const daysUntilExpiry = Math.ceil((new Date(b.expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                return daysUntilExpiry <= 30 && daysUntilExpiry > 0;
+              }).length || 0}
+            </div>
           </CardContent>
         </Card>
+
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Expired</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Expired Batches</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-destructive">{expired.length}</div>
+            <div className="text-2xl font-bold text-destructive">
+              {stockBatches?.filter(b => new Date(b.expiryDate) < new Date()).length || 0}
+            </div>
           </CardContent>
         </Card>
       </div>
-
-      <Card className="border-amber-500/40">
-        <CardHeader>
-          <CardTitle>Critical Attention Queue</CardTitle>
-          <CardDescription>
-            Low-stock, expiring, or expired batches that need immediate admin follow-up.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {criticalAttention.length > 0 ? (
-            criticalAttention.slice(0, 6).map((batch) => {
-              const isExpiringSoon = expiringSoon.some((item) => item.id === batch.id);
-
-              return (
-                <div key={batch.id} className="flex items-center justify-between rounded-xl border p-4">
-                  <div>
-                    <p className="font-medium">{batch.product?.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {batch.branch?.name} | Batch {batch.batchNumber}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {batch.quantity <= 10 && <Badge className="bg-amber-500">Low stock</Badge>}
-                    {isExpiringSoon && <Badge className="bg-sky-600">Expiring soon</Badge>}
-                    {new Date(batch.expiryDate) < now && <Badge variant="destructive">Expired</Badge>}
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No low-stock or expiring batches currently need escalation.
-            </p>
-          )}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <CardTitle>Inventory Register</CardTitle>
-              <CardDescription>
-                Batch-level visibility across branches, suppliers, and expiry dates.
-              </CardDescription>
+              <CardTitle>Stock Batches</CardTitle>
+              <CardDescription>All inventory batches across branches</CardDescription>
             </div>
-            <div className="relative w-full lg:w-80">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="relative w-full md:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search batches..."
                 className="pl-10"
-                placeholder="Search product, branch, or batch"
+                data-testid="input-search-batches"
               />
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Batch</TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead>Branch</TableHead>
-                <TableHead>Supplier</TableHead>
-                <TableHead>Quantity</TableHead>
-                <TableHead>Expiry</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredBatches.length > 0 ? (
-                filteredBatches.map((batch) => {
-                  const isExpired = new Date(batch.expiryDate) < now;
-                  const isExpiringSoon = !isExpired && expiringSoon.some((item) => item.id === batch.id);
-                  const isLowStock = batch.quantity <= 10;
-
-                  return (
-                    <TableRow key={batch.id}>
-                      <TableCell className="font-mono text-xs">{batch.batchNumber}</TableCell>
-                      <TableCell className="font-medium">{batch.product?.name}</TableCell>
-                      <TableCell>{batch.branch?.name}</TableCell>
-                      <TableCell>{batch.supplierName || "Warehouse"}</TableCell>
-                      <TableCell>{batch.quantity}</TableCell>
-                      <TableCell>{format(new Date(batch.expiryDate), "MMM d, yyyy")}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-2">
-                          {isExpired && <Badge variant="destructive">Expired</Badge>}
-                          {isExpiringSoon && <Badge className="bg-sky-600">Expiring soon</Badge>}
-                          {isLowStock && <Badge className="bg-amber-500">Low stock</Badge>}
-                          {!isExpired && !isExpiringSoon && !isLowStock && (
-                            <Badge variant="outline">Healthy</Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              ) : (
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
-                    <Package className="mx-auto mb-3 h-10 w-10 opacity-50" />
-                    No inventory batches match the current search.
-                  </TableCell>
+                  <TableHead>Batch #</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Branch</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead>Expiry Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {batchesLoading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-8 w-16" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : stockBatches && stockBatches.length > 0 ? (
+                  stockBatches.slice(0, 20).map((batch) => {
+                    const expiryStatus = getExpiryStatus(batch.expiryDate);
+                    const stockStatus = getStockStatus(batch.quantity);
+
+                    return (
+                      <TableRow key={batch.id} data-testid={`batch-row-${batch.id}`}>
+                        <TableCell className="font-mono text-sm">{batch.batchNumber}</TableCell>
+                        <TableCell className="font-medium">{batch.product.name}</TableCell>
+                        <TableCell>{batch.branch.name}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {batch.quantity}
+                        </TableCell>
+                        <TableCell>{format(new Date(batch.expiryDate), 'MMM dd, yyyy')}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {expiryStatus && (
+                              <Badge className={expiryStatus.className}>{expiryStatus.label}</Badge>
+                            )}
+                            {stockStatus && (
+                              <Badge className={stockStatus.className}>{stockStatus.label}</Badge>
+                            )}
+                            {!expiryStatus && !stockStatus && (
+                              <Badge variant="outline">Good</Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="ghost" data-testid={`button-view-${batch.id}`}>View</Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                      <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>No stock batches found</p>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Receive Stock</DialogTitle>
-            <DialogDescription>
-              Register a new batch so stock, expiry, and branch visibility stay accurate.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="stock-product">Product</Label>
-              <select
-                id="stock-product"
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={form.productId}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, productId: event.target.value }))
-                }
-              >
-                <option value="">Select product</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="stock-branch">Branch</Label>
-              <select
-                id="stock-branch"
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={form.branchId}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, branchId: event.target.value }))
-                }
-              >
-                <option value="">Select branch</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="stock-batch-number">Batch Number</Label>
-                <Input
-                  id="stock-batch-number"
-                  value={form.batchNumber}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, batchNumber: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="stock-quantity">Quantity</Label>
-                <Input
-                  id="stock-quantity"
-                  type="number"
-                  min="1"
-                  value={form.quantity}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, quantity: event.target.value }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="stock-expiry">Expiry Date</Label>
-                <Input
-                  id="stock-expiry"
-                  type="date"
-                  value={form.expiryDate}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, expiryDate: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="stock-cost">Cost Price</Label>
-                <Input
-                  id="stock-cost"
-                  value={form.costPrice}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, costPrice: event.target.value }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="stock-supplier">Supplier</Label>
-              <Input
-                id="stock-supplier"
-                value={form.supplierName}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, supplierName: event.target.value }))
-                }
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => createBatchMutation.mutate(form)}
-              disabled={!isFormValid || createBatchMutation.isPending}
-            >
-              {createBatchMutation.isPending ? "Receiving..." : "Receive Stock"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -15,25 +15,11 @@ import { apiRequest } from "@/lib/queryClient";
 import { useState, useCallback, useMemo } from "react";
 
 export default function CheckoutPage() {
-  const { user, isAuthenticated, isCustomer } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const { items, clearCart, getTotalPrice } = useCart();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-
-  type CreateOrderPayload = {
-    customerId: string | undefined;
-    branchId: string;
-    items: Array<{ productId: string; quantity: number; unitPrice: string }>;
-    subtotal: number;
-    deliveryCharge: number;
-    total: number;
-    deliveryAddress: string;
-    deliveryCity: string;
-    paymentMethod: string;
-    status: string;
-    paymentStatus: string;
-  };
   
   const [formData, setFormData] = useState({
     deliveryAddress: "",
@@ -41,8 +27,8 @@ export default function CheckoutPage() {
     paymentMethod: "cash",
   });
 
-  const createOrderMutation = useMutation<Response, Error, CreateOrderPayload>({
-    mutationFn: async (orderData: CreateOrderPayload) => {
+  const createOrderMutation = useMutation({
+    mutationFn: async (orderData) => {
       return apiRequest("/api/orders", {
         method: "POST",
         body: JSON.stringify(orderData),
@@ -119,12 +105,12 @@ export default function CheckoutPage() {
   const deliveryCharge = 500;
   const total = subtotal + deliveryCharge;
 
-  if (!isAuthenticated || !isCustomer) {
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-background">
         <CustomerNav />
         <div className="container mx-auto px-4 py-8 text-center">
-          <p className="text-muted-foreground">Only customers can proceed to checkout.</p>
+          <p className="text-muted-foreground">Please log in to checkout</p>
         </div>
       </div>
     );

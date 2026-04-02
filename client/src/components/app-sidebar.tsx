@@ -1,5 +1,17 @@
 import { 
+  LayoutDashboard, 
+  Package, 
+  FileText, 
+  ShoppingCart, 
+  Truck, 
+  Users, 
+  Building2,
+  Calendar,
+  FileCheck,
+  BarChart3,
   Settings,
+  Pill,
+  ClipboardList
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -17,17 +29,52 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { getRoleDefinition } from "@shared/roleCapabilities";
-import { getRoleWorkspaceRoutes, isWorkspaceRouteActive } from "@/lib/roleWorkspace";
 
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, isAdmin, isPharmacist, isStaff, isDriver } = useAuth();
-  const roleDefinition = user ? getRoleDefinition(user.role) : null;
-  const menuItems =
-    isAdmin || isPharmacist || isStaff || isDriver
-      ? getRoleWorkspaceRoutes(user?.role)
-      : [];
+
+  const adminItems = [
+    { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
+    { title: "Branches", url: "/admin/branches", icon: Building2 },
+    { title: "Users", url: "/admin/users", icon: Users },
+    { title: "Products", url: "/admin/products", icon: Pill },
+    { title: "Inventory", url: "/admin/inventory", icon: Package },
+    { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
+    { title: "Analytics", url: "/admin/analytics", icon: BarChart3 },
+    { title: "Content", url: "/admin/content", icon: FileText },
+    { title: "Performance", url: "/performance/admin", icon: BarChart3 },
+    { title: "Settings", url: "/admin/settings", icon: Settings },
+  ];
+
+  const pharmacistItems = [
+    { title: "Dashboard", url: "/pharmacist", icon: LayoutDashboard },
+    { title: "Prescriptions", url: "/pharmacist/prescriptions", icon: FileCheck },
+    { title: "Inventory", url: "/pharmacist/inventory", icon: Package },
+    { title: "Performance", url: "/performance/pharmacist", icon: BarChart3 },
+    { title: "Portfolio", url: "/portfolio/pharmacist", icon: Users },
+  ];
+
+  const staffItems = [
+    { title: "Dashboard", url: "/staff", icon: LayoutDashboard },
+    { title: "POS", url: "/pos", icon: ShoppingCart },
+    { title: "Orders", url: "/staff/orders", icon: ClipboardList },
+    { title: "Performance", url: "/performance/staff", icon: BarChart3 },
+  ];
+
+  const driverItems = [
+    { title: "Active Deliveries", url: "/driver", icon: Truck },
+    { title: "History", url: "/driver/history", icon: FileText },
+    { title: "Performance", url: "/performance/driver", icon: BarChart3 },
+    { title: "Portfolio", url: "/portfolio/driver", icon: Users },
+  ];
+
+  const menuItems: { title: string; url: string; icon: any }[] = 
+    isAdmin ? adminItems :
+    isPharmacist ? pharmacistItems :
+    isStaff ? staffItems :
+    isDriver ? driverItems :
+    [];
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
@@ -50,13 +97,8 @@ export function AppSidebar() {
             <h2 className="text-base font-semibold truncate">Thandizo Pharmacy</h2>
             {user && (
               <Badge className={`text-xs mt-1 ${getRoleBadgeColor(user.role)}`}>
-                {roleDefinition?.label || (user.role.charAt(0).toUpperCase() + user.role.slice(1))}
+                {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
               </Badge>
-            )}
-            {roleDefinition && (
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                {roleDefinition.headline}
-              </p>
             )}
           </div>
         </div>
@@ -68,13 +110,13 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
+                <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton
                     asChild
-                    isActive={isWorkspaceRouteActive(item, location)}
+                    isActive={location === item.url}
                     data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
                   >
-                    <Link href={item.href}>
+                    <Link href={item.url}>
                       <item.icon className="w-4 h-4" />
                       <span>{item.title}</span>
                     </Link>
@@ -102,9 +144,6 @@ export function AppSidebar() {
               {user?.email}
             </p>
           </div>
-          <Link href="/settings/account">
-            <Settings className="h-4 w-4 text-muted-foreground" />
-          </Link>
         </div>
       </SidebarFooter>
     </Sidebar>

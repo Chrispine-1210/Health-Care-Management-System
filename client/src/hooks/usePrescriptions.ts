@@ -1,15 +1,15 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient, unwrapApiResponse } from '@/lib/queryClient';
+import { queryClient } from '@/lib/queryClient';
 
 export function usePrescriptions() {
   return useQuery({
     queryKey: ['/api/prescriptions'],
     queryFn: async () => {
       const res = await fetch('/api/prescriptions', {
-        headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       if (!res.ok) throw new Error('Failed to fetch prescriptions');
-      return unwrapApiResponse(await res.json());
+      return res.json();
     },
   });
 }
@@ -21,12 +21,12 @@ export function useUploadPrescription() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to upload prescription');
-      return unwrapApiResponse(await res.json());
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/prescriptions'] });
@@ -41,12 +41,12 @@ export function useApprovePrescription() {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify({ status: approved ? 'approved' : 'rejected' }),
       });
       if (!res.ok) throw new Error('Failed to update prescription');
-      return unwrapApiResponse(await res.json());
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/prescriptions'] });

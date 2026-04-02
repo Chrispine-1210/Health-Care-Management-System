@@ -40,16 +40,8 @@ export default function ConsultationsPage() {
     enabled: isAuthenticated && !authLoading && !!user?.id,
   });
 
-  type CreateAppointmentPayload = {
-    type: string;
-    scheduledAt: string;
-    chiefComplaint: string;
-    status: string;
-    duration: number;
-  };
-
-  const createAppointmentMutation = useMutation<Response, Error, CreateAppointmentPayload>({
-    mutationFn: async (data: CreateAppointmentPayload) => {
+  const createAppointmentMutation = useMutation({
+    mutationFn: async (data) => {
       return apiRequest("/api/appointments", {
         method: "POST",
         body: JSON.stringify({

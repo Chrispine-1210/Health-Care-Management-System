@@ -175,7 +175,7 @@ export default function OrderDetailPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm">Delivery Charge</span>
-                    <span className="font-medium">MK {parseFloat(order.deliveryCharge ?? "0").toFixed(2)}</span>
+                    <span className="font-medium">MK {parseFloat(order.deliveryCharge || 0).toFixed(2)}</span>
                   </div>
                   <div className="border-t pt-2 flex justify-between">
                     <span className="font-semibold">Total</span>

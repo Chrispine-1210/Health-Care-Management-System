@@ -47,7 +47,7 @@ export default function CustomerHomeNew() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/login";
+        window.location.href = "/api/login";
       }, 500);
     }
   }, [isAuthenticated, authLoading, toast]);

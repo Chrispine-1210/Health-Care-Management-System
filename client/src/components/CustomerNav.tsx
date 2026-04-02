@@ -1,5 +1,5 @@
-import { ShoppingCart, Search, Bell } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { ShoppingCart, Search, User, Menu } from "lucide-react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -15,26 +15,17 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
-import { getRoleWorkspaceRoutes, isWorkspaceRouteActive } from "@/lib/roleWorkspace";
 
 export function CustomerNav() {
-  const [location] = useLocation();
-  const { user, isAuthenticated, signOut } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { getItemCount } = useCart();
   const cartCount = getItemCount();
-  const customerRoutes = getRoleWorkspaceRoutes("customer");
-  const primaryLinks = customerRoutes.filter((route) =>
-    ["dashboard", "shop", "orders", "prescriptions", "consultations"].includes(route.key),
-  );
-  const profileLinks = customerRoutes.filter((route) =>
-    ["profile", "notifications"].includes(route.key),
-  );
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between gap-4">
-          <Link href="/customer">
+          <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer">
               <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-bold">
                 T
@@ -64,7 +55,7 @@ export function CustomerNav() {
               <Search className="h-5 w-5" />
             </Button>
 
-            <Link href="/customer/cart">
+            <Link href="/cart">
               <Button 
                 variant="ghost" 
                 size="icon" 
@@ -77,17 +68,6 @@ export function CustomerNav() {
                     {cartCount}
                   </Badge>
                 )}
-              </Button>
-            </Link>
-
-            <Link href="/customer/notifications">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative hover-elevate active-elevate-2"
-                data-testid="button-notifications"
-              >
-                <Bell className="h-5 w-5" />
               </Button>
             </Link>
 
@@ -118,52 +98,36 @@ export function CustomerNav() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {profileLinks.map((route) => (
-                    <DropdownMenuItem key={route.key} asChild>
-                      <Link href={route.href}>{route.title}</Link>
-                    </DropdownMenuItem>
-                  ))}
                   <DropdownMenuItem asChild>
-                    <Link href="/customer/profile/view">View Portfolio</Link>
+                    <Link href="/profile">Profile</Link>
                   </DropdownMenuItem>
-                  {primaryLinks
-                    .filter((route) => route.key !== "dashboard")
-                    .map((route) => (
-                      <DropdownMenuItem key={route.key} asChild>
-                        <Link href={route.href}>{route.title}</Link>
-                      </DropdownMenuItem>
-                    ))}
+                  <DropdownMenuItem asChild>
+                    <Link href="/profile/view">View Portfolio</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/performance/customer">Performance Dashboard</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/orders">My Orders</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/prescriptions">My Prescriptions</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/consultations">Book Consultation</Link>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={(e) => {
-                      e.preventDefault();
-                      void signOut();
-                    }}
-                    data-testid="menu-logout"
-                  >
-                    Logout
+                  <DropdownMenuItem asChild>
+                    <a href="/api/logout">Logout</a>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
               <Button asChild data-testid="button-login">
-                <Link href="/login">Login</Link>
+                <a href="/api/login">Login</a>
               </Button>
             )}
           </div>
-        </div>
-
-        <div className="hidden gap-2 border-t border-border py-3 lg:flex lg:flex-wrap">
-          {primaryLinks.map((route) => (
-            <Button
-              key={route.key}
-              variant={isWorkspaceRouteActive(route, location) ? "default" : "ghost"}
-              size="sm"
-              asChild
-            >
-              <Link href={route.href}>{route.title}</Link>
-            </Button>
-          ))}
         </div>
       </div>
     </header>

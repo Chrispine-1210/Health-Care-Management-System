@@ -29,16 +29,17 @@ export default function PrescriptionsPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
-      if (file.size > 5 * 1024 * 1024) {
-        throw new Error("Please upload a file smaller than 5MB");
-      }
-
       const reader = new FileReader();
       return new Promise((resolve, reject) => {
         reader.onload = async () => {
           try {
-            const result = await apiRequest("POST", "/api/prescriptions", {
-              fileUrl: typeof reader.result === "string" ? reader.result : null,
+            const result = await apiRequest("/api/prescriptions/upload", {
+              method: "POST",
+              body: JSON.stringify({
+                fileData: reader.result,
+                fileName: file.name,
+                patientId: user?.id,
+              }),
             });
             resolve(result);
           } catch (error) {
@@ -46,7 +47,7 @@ export default function PrescriptionsPage() {
           }
         };
         reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
+        reader.readAsArrayBuffer(file);
       });
     },
     onSuccess: () => {
