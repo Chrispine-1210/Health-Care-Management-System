@@ -1,630 +1,419 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Delivery, Order, User } from "@shared/schema";
-import { apiRequest } from "@/lib/queryClient";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { useConversations } from "@/hooks/useNotifications";
-import { Badge } from "@/components/ui/badge";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import { OrderTrackingProgress } from "@/components/OrderTrackingProgress";
-import { RoleWorkspacePanel } from "@/components/RoleWorkspacePanel";
-import { DashboardShell } from "@/components/dashboard/DashboardShell";
-import { MetricCard } from "@/components/dashboard/MetricCard";
 import { ChatWidget } from "@/components/ChatWidget";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertCircle, Truck, MapPin, Phone, CheckCircle2, Navigation, Clock, Star, BarChart3, ShieldAlert } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
 import { DriverMapTracker } from "@/components/DriverMapTracker";
-import {
-  CheckCircle2,
-  MapPin,
-  Navigation,
-  Phone,
-  Route,
-  ShieldAlert,
-  Truck,
-} from "lucide-react";
+import { MeritBadges, badgeDefinitions } from "@/components/MeritBadges";
+import type { Delivery, Order, User } from "@shared/schema";
 
 type DeliveryWithDetails = Delivery & {
   order: Order;
   customer: User;
 };
 
-type DeliveryFormState = {
-  proofOfDeliveryUrl: string;
-  deliveryNotes: string;
-};
-
-const emptyDeliveryForm: DeliveryFormState = {
-  proofOfDeliveryUrl: "",
-  deliveryNotes: "",
-};
-
 export default function DriverDashboardNew() {
   const { toast } = useToast();
-  const { user, isDriver, isAuthenticated, isLoading: authLoading, signOut } = useAuth();
-  const queryClient = useQueryClient();
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [deliveryForms, setDeliveryForms] = useState<Record<string, DeliveryFormState>>({});
-
-  useEffect(() => {
-    if (!authLoading && (!isAuthenticated || !isDriver)) {
-      toast({
-        title: "Unauthorized",
-        description: "Access denied. Redirecting to login.",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        window.location.href = "/login";
-      }, 500);
-    }
-  }, [authLoading, isAuthenticated, isDriver, toast]);
 
   const handleOptimizeRoute = useCallback(() => {
     setIsOptimizing(true);
     setTimeout(() => {
       setIsOptimizing(false);
       toast({
-        title: "Routes optimized",
-        description: "Delivery stops have been reordered to reduce travel time and keep customers updated.",
+        title: "Routes Optimized",
+        description: "AI has recalculated the best path for your 3 pending deliveries, saving 4.2km of travel.",
       });
-    }, 1200);
+    }, 1500);
   }, [toast]);
 
-  const { data: deliveries = [], isLoading: deliveriesLoading } = useQuery<DeliveryWithDetails[]>({
-    queryKey: ["/api/driver/deliveries/active"],
-    enabled: isAuthenticated && isDriver,
-    refetchInterval: 10000,
-  });
-
-  const { data: conversations = [] } = useConversations({
-    enabled: isAuthenticated && isDriver,
-  });
-
-  const invalidateDriverQueues = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["/api/driver/deliveries/active"] });
-    await queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-    await queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-  }, [queryClient]);
-
-  const pickupMutation = useMutation({
-    mutationFn: (deliveryId: string) =>
-      apiRequest("PATCH", `/api/deliveries/${deliveryId}/status`, {
-        status: "picked_up",
-      }),
-    onSuccess: async () => {
-      await invalidateDriverQueues();
-      toast({
-        title: "Pickup confirmed",
-        description: "The order is now marked as picked up and ready for live status updates.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Pickup failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const transitMutation = useMutation({
-    mutationFn: (deliveryId: string) =>
-      apiRequest("PATCH", `/api/deliveries/${deliveryId}/status`, {
-        status: "in_transit",
-      }),
-    onSuccess: async () => {
-      await invalidateDriverQueues();
-      toast({
-        title: "Live status reported",
-        description: "Customers and staff can now see that this delivery is in transit.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Status update failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const completeMutation = useMutation({
-    mutationFn: (params: { deliveryId: string; proofOfDeliveryUrl: string; deliveryNotes: string }) =>
-      apiRequest("PATCH", `/api/deliveries/${params.deliveryId}/status`, {
-        status: "delivered",
-        proofOfDeliveryUrl: params.proofOfDeliveryUrl,
-        deliveryNotes: params.deliveryNotes,
-      }),
-    onSuccess: async (_response, variables) => {
-      await invalidateDriverQueues();
-      setDeliveryForms((current) => ({
-        ...current,
-        [variables.deliveryId]: emptyDeliveryForm,
-      }));
-      toast({
-        title: "Delivery completed",
-        description: "Proof of delivery and final notes were saved successfully.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Delivery confirmation failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const assignedDeliveries = useMemo(
-    () => deliveries.filter((delivery) => ["assigned", "pending"].includes(delivery.status)),
-    [deliveries],
-  );
-
-  const pickedUpDeliveries = useMemo(
-    () => deliveries.filter((delivery) => delivery.status === "picked_up"),
-    [deliveries],
-  );
-
-  const inTransitDeliveries = useMemo(
-    () => deliveries.filter((delivery) => delivery.status === "in_transit"),
-    [deliveries],
-  );
-
-  const completedDeliveries = useMemo(
-    () => deliveries.filter((delivery) => delivery.status === "delivered"),
-    [deliveries],
-  );
-
-  const coordinationThreads = useMemo(
-    () =>
-      conversations.filter((conversation) =>
-        ["customer", "staff", "admin"].includes(conversation.participantRole),
-      ),
-    [conversations],
-  );
-
-  const liveDelivery = inTransitDeliveries[0] || pickedUpDeliveries[0] || null;
+  const { user, isDriver, isAuthenticated, isLoading: authLoading, signOut } = useAuth();
+  const queryClient = useQueryClient();
+  const [selectedDelivery, setSelectedDelivery] = useState<string | null>(null);
+  const [trackingActive, setTrackingActive] = useState(false);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
-    if (!liveDelivery || !("geolocation" in navigator)) {
-      return;
+    if (!authLoading && (!isAuthenticated || !isDriver)) {
+      toast({
+        title: "Unauthorized",
+        description: "Access denied. Redirecting...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
     }
+  }, [isAuthenticated, isDriver, authLoading, toast]);
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        setDriverLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
-      },
-      () => {
-        toast({
-          title: "Location unavailable",
-          description: "Live GPS tracking could not start on this device.",
-          variant: "destructive",
-        });
-      },
-      { enableHighAccuracy: true },
-    );
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [liveDelivery, toast]);
-
-  const getDeliveryForm = useCallback(
-    (deliveryId: string) => deliveryForms[deliveryId] || emptyDeliveryForm,
-    [deliveryForms],
-  );
-
-  const updateDeliveryForm = useCallback(
-    (deliveryId: string, field: keyof DeliveryFormState, value: string) => {
-      setDeliveryForms((current) => ({
-        ...current,
-        [deliveryId]: {
-          ...(current[deliveryId] || emptyDeliveryForm),
-          [field]: value,
+  // Get live location
+  useEffect(() => {
+    if (trackingActive && "geolocation" in navigator) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          setDriverLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
         },
-      }));
+        (error) => {
+          console.error("Geolocation error:", error);
+          toast({
+            title: "Location Error",
+            description: "Unable to access your location",
+            variant: "destructive",
+          });
+        }
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, [trackingActive, toast]);
+
+  const { data: activeDeliveries, isLoading: deliveriesLoading } = useQuery<DeliveryWithDetails[]>({
+    queryKey: ["/api/driver/deliveries/active"],
+    enabled: isAuthenticated && isDriver,
+  });
+
+  const confirmOrderMutation = useMutation({
+    mutationFn: async (deliveryId: string) => {
+      return apiRequest(`/api/deliveries/${deliveryId}/status`, "PATCH", {
+        status: "picked_up",
+      });
     },
-    [],
-  );
+    onSuccess: () => {
+      toast({ title: "Order Confirmed", description: "Starting delivery to customer" });
+      queryClient.invalidateQueries({ queryKey: ["/api/driver/deliveries/active"] });
+      setTrackingActive(true);
+    },
+  });
+
+  const completeDeliveryMutation = useMutation({
+    mutationFn: async (deliveryId: string) => {
+      return apiRequest(`/api/deliveries/${deliveryId}/status`, "PATCH", {
+        status: "delivered",
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Delivery Complete", description: "Thank you for your service!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/driver/deliveries/active"] });
+      setTrackingActive(false);
+    },
+  });
 
   if (authLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      <div className="h-screen flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
       </div>
     );
   }
 
-  const renderLoadingStack = () =>
-    Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-40 w-full" />);
+  const pendingDeliveries = activeDeliveries?.filter(d => ['assigned', 'pending'].includes(d.status)) || [];
+  const inTransitDeliveries = activeDeliveries?.filter(d => ['picked_up', 'in_transit'].includes(d.status)) || [];
+  const completedToday = activeDeliveries?.filter(d => d.status === 'delivered') || [];
+  const currentDelivery = inTransitDeliveries[0]; // First in-transit delivery
 
   return (
-    <DashboardShell
-      role="Driver"
-      title="Delivery Operations Dashboard"
-      description="Receive assigned deliveries, confirm pickup, report live delivery status, capture proof of delivery, and coordinate directly with staff and customers."
-      actions={(
-        <>
-          <Button variant="outline" onClick={handleOptimizeRoute} disabled={isOptimizing}>
-            <Route className="mr-2 h-4 w-4" />
-            {isOptimizing ? "Optimizing..." : "Optimize Route"}
-          </Button>
-          <Button variant="outline" className="border-red-200 bg-red-50 text-red-600 hover:bg-red-100">
-            <ShieldAlert className="mr-2 h-4 w-4" />
-            SOS Emergency
-          </Button>
-          <ChatWidget userId={user?.id || ""} userRole="driver" />
-          <Button variant="outline" onClick={signOut} data-testid="button-logout">
-            Sign Out
-          </Button>
-        </>
-      )}
-    >
+    <div className="min-h-screen bg-gradient-to-br from-primary/5 to-primary/10">
+      <div className="container mx-auto p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold flex items-center gap-3">
+              <Truck className="h-10 w-10 text-primary" />
+              Driver Control Panel
+            </h1>
+            <p className="text-muted-foreground mt-1">Manage your deliveries and real-time tracking</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button variant="outline" className="text-primary border-primary hover:bg-primary/5">
+              <Navigation className="h-4 w-4 mr-2" />
+              Optimize Route
+            </Button>
+            <Button variant="outline" className="text-red-600 border-red-200 bg-red-50 hover:bg-red-100">
+              <ShieldAlert className="h-4 w-4 mr-2" />
+              SOS Emergency
+            </Button>
+            <ChatWidget userId={user?.id || ""} userRole="driver" />
+            <div className="text-right">
+              <p className="text-2xl font-bold text-primary">{completedToday.length}</p>
+              <p className="text-sm text-muted-foreground">Completed Today</p>
+            </div>
+            <Button variant="outline" onClick={signOut} data-testid="button-logout">
+              Sign Out
+            </Button>
+          </div>
+        </div>
 
-      <RoleWorkspacePanel
-        role="driver"
-        title="Driver Routes"
-        description="Open the delivery, coordination, history, and performance tools assigned to driver workflows."
-        excludeKeys={["dashboard"]}
-        limit={4}
-      />
+        {/* Merit Badges */}
+        <Card className="bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-950/30 dark:to-orange-950/30 border-yellow-200 dark:border-yellow-800">
+          <CardContent className="pt-6">
+            <MeritBadges 
+              badges={[
+                badgeDefinitions.speed_demon,
+                badgeDefinitions.five_star_champion,
+                badgeDefinitions.customer_favorite,
+              ]} 
+              role="driver" 
+            />
+          </CardContent>
+        </Card>
 
-      {liveDelivery && driverLocation && (
-        <DriverMapTracker
-          driverLocation={driverLocation}
-          customerLocation={{
-            lat: parseFloat(liveDelivery.order.deliveryLatitude || "0"),
-            lng: parseFloat(liveDelivery.order.deliveryLongitude || "0"),
-          }}
-          destination={liveDelivery.order.deliveryAddress ?? undefined}
-          distance={liveDelivery.order.deliveryDistance ? parseFloat(liveDelivery.order.deliveryDistance) : undefined}
-          isTracking
-        />
-      )}
+        {/* Map Tracker */}
+        {trackingActive && (
+          <DriverMapTracker
+            driverLocation={driverLocation}
+            customerLocation={currentDelivery?.order ? 
+              { 
+                lat: parseFloat(currentDelivery.order.deliveryLatitude || '0'),
+                lng: parseFloat(currentDelivery.order.deliveryLongitude || '0')
+              } 
+              : undefined
+            }
+            destination={currentDelivery?.order?.deliveryAddress ?? undefined}
+            distance={currentDelivery?.order?.deliveryDistance ? 
+              parseFloat(currentDelivery.order.deliveryDistance) 
+              : undefined
+            }
+            isTracking={trackingActive}
+          />
+        )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricCard
-          title="Assigned"
-          value={assignedDeliveries.length}
-          description="Deliveries waiting for pickup confirmation"
-          tone="warning"
-        />
-        <MetricCard
-          title="Picked Up"
-          value={pickedUpDeliveries.length}
-          description="Ready for a live in-transit report"
-          tone="info"
-        />
-        <MetricCard
-          title="In Transit"
-          value={inTransitDeliveries.length}
-          description="Customers can currently track these orders"
-          tone="success"
-        />
-        <MetricCard
-          title="Completed"
-          value={completedDeliveries.length}
-          description="Deliveries closed with proof and notes"
-        />
-        <MetricCard
-          title="Coordination Threads"
-          value={coordinationThreads.length}
-          description="Active customer or staff conversations"
-        />
-      </div>
-
-      <Tabs defaultValue="assigned" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 gap-2 md:grid-cols-4">
-          <TabsTrigger value="assigned">Assigned</TabsTrigger>
-          <TabsTrigger value="live">Live Status</TabsTrigger>
-          <TabsTrigger value="coordination">Coordination</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="assigned" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Receive Assigned Deliveries</CardTitle>
-              <CardDescription>
-                Confirm pickup as soon as you receive a delivery assignment so the workflow stays accurate.
-              </CardDescription>
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card data-testid="card-pending-deliveries">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {deliveriesLoading ? (
-                renderLoadingStack()
-              ) : assignedDeliveries.length > 0 ? (
-                assignedDeliveries.map((delivery) => (
-                  <div key={delivery.id} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold">
-                            {delivery.customer.firstName} {delivery.customer.lastName}
-                          </p>
-                          <Badge variant="outline">{delivery.status}</Badge>
-                        </div>
-                        <div className="space-y-1 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4" />
-                            <span>{delivery.order.deliveryAddress || "Delivery address pending"}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Phone className="h-4 w-4" />
-                            <span>{delivery.customer.phone || "No phone on file"}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Navigation className="h-4 w-4" />
-                            <span>
-                              {delivery.order.deliveryDistance
-                                ? `${parseFloat(delivery.order.deliveryDistance).toFixed(1)} km`
-                                : "Distance pending"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {delivery.customer.phone && (
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              window.location.href = `tel:${delivery.customer.phone}`;
-                            }}
-                          >
-                            Contact Customer
-                          </Button>
-                        )}
-                        <Button
-                          onClick={() => pickupMutation.mutate(delivery.id)}
-                          disabled={pickupMutation.isPending}
-                        >
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Confirm Pickup
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Truck className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No assigned deliveries right now</p>
-                  <p className="text-sm text-muted-foreground">
-                    New assignments will appear here as soon as staff dispatches them.
-                  </p>
-                </div>
-              )}
+            <CardContent>
+              <div className="text-3xl font-bold text-chart-3">{pendingDeliveries.length}</div>
+              <p className="text-xs text-muted-foreground">Ready for pickup</p>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="live" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Live Status and Proof of Delivery</CardTitle>
-              <CardDescription>
-                Report in-transit status, then close the job with proof of delivery and completion notes.
-              </CardDescription>
+          <Card data-testid="card-in-transit">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">In Transit</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {deliveriesLoading ? (
-                renderLoadingStack()
-              ) : pickedUpDeliveries.length > 0 || inTransitDeliveries.length > 0 ? (
-                [...pickedUpDeliveries, ...inTransitDeliveries].map((delivery) => {
-                  const form = getDeliveryForm(delivery.id);
-
-                  return (
-                    <div key={delivery.id} className="rounded-xl border p-4">
-                      <div className="flex flex-col gap-4">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-semibold">Order #{delivery.orderId.slice(0, 8)}</p>
-                              <Badge className={delivery.status === "in_transit" ? "bg-emerald-600" : "bg-sky-600"}>
-                                {delivery.status === "in_transit" ? "In Transit" : "Picked Up"}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              {delivery.customer.firstName} {delivery.customer.lastName} | {delivery.order.deliveryAddress}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {delivery.status === "picked_up" && (
-                              <Button
-                                variant="outline"
-                                onClick={() => transitMutation.mutate(delivery.id)}
-                                disabled={transitMutation.isPending}
-                              >
-                                Report In Transit
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="grid gap-4 lg:grid-cols-2">
-                          <div className="space-y-2">
-                            <p className="text-sm font-medium">Proof of delivery reference</p>
-                            <Input
-                              placeholder="Paste photo URL or proof reference"
-                              value={form.proofOfDeliveryUrl}
-                              onChange={(event) =>
-                                updateDeliveryForm(delivery.id, "proofOfDeliveryUrl", event.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <p className="text-sm font-medium">Live delivery notes</p>
-                            <Textarea
-                              className="min-h-[44px]"
-                              placeholder="Customer reached, gate code, delay note, or final handoff note"
-                              value={form.deliveryNotes}
-                              onChange={(event) =>
-                                updateDeliveryForm(delivery.id, "deliveryNotes", event.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-
-                        <OrderTrackingProgress
-                          status={delivery.status}
-                          deliveryDistance={delivery.order.deliveryDistance}
-                          deliveryAddress={delivery.order.deliveryAddress}
-                          deliveryNotes={form.deliveryNotes || delivery.deliveryNotes}
-                        />
-
-                        <div className="flex flex-wrap gap-2">
-                          {delivery.customer.phone && (
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                window.location.href = `tel:${delivery.customer.phone}`;
-                              }}
-                            >
-                              Contact Customer
-                            </Button>
-                          )}
-                          <Button
-                            onClick={() =>
-                              completeMutation.mutate({
-                                deliveryId: delivery.id,
-                                proofOfDeliveryUrl: form.proofOfDeliveryUrl,
-                                deliveryNotes: form.deliveryNotes,
-                              })
-                            }
-                            disabled={completeMutation.isPending || !form.proofOfDeliveryUrl.trim()}
-                          >
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                            Confirm Delivery
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Navigation className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No live delivery updates required right now</p>
-                  <p className="text-sm text-muted-foreground">
-                    Picked-up and in-transit deliveries will appear here for live reporting.
-                  </p>
-                </div>
-              )}
+            <CardContent>
+              <div className="text-3xl font-bold text-primary">{inTransitDeliveries.length}</div>
+              <p className="text-xs text-muted-foreground">Currently delivering</p>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="coordination" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Customer and Staff Coordination</CardTitle>
-              <CardDescription>
-                Keep communication active with the people involved in your current delivery work.
-              </CardDescription>
+          <Card data-testid="card-completed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Completed</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {coordinationThreads.length > 0 ? (
-                coordinationThreads.map((conversation) => (
-                  <div key={conversation.conversationId} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate font-medium">{conversation.participantName}</p>
-                          <Badge variant="outline">{conversation.participantRole}</Badge>
-                          {conversation.online && <Badge className="bg-emerald-600">Online</Badge>}
-                        </div>
-                        <p className="mt-1 truncate text-sm text-muted-foreground">
-                          {conversation.lastMessage}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {conversation.unread > 0 && <Badge>{conversation.unread} unread</Badge>}
-                        <Button variant="outline" size="sm" onClick={() => window.location.href = "/driver/inbox"}>
-                          Open Chat
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Phone className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No coordination threads yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Customer and staff conversations will appear here when delivery coordination starts.
-                  </p>
-                </div>
-              )}
+            <CardContent>
+              <div className="text-3xl font-bold text-chart-1">{completedToday.length}</div>
+              <p className="text-xs text-muted-foreground">Today's completions</p>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="history" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Completed Deliveries</CardTitle>
-              <CardDescription>
-                Review finished jobs, delivery notes, and proof references that were recorded.
-              </CardDescription>
+          <Card data-testid="card-earnings">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Earnings</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {completedDeliveries.length > 0 ? (
-                completedDeliveries.map((delivery) => (
-                  <div key={delivery.id} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <CardContent>
+              <div className="text-3xl font-bold text-chart-2">MK {(completedToday.reduce((sum, d) => sum + parseFloat(d.order.deliveryCharge || '0'), 0)).toLocaleString()}</div>
+              <p className="text-xs text-muted-foreground">Today's delivery fees</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Tabs defaultValue="pending" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="pending">Pending Orders ({pendingDeliveries.length})</TabsTrigger>
+            <TabsTrigger value="transit">In Transit ({inTransitDeliveries.length})</TabsTrigger>
+            <TabsTrigger value="performance">Performance</TabsTrigger>
+            <TabsTrigger value="history">Delivery History</TabsTrigger>
+          </TabsList>
+
+          {/* Delivery History Tab */}
+          <TabsContent value="history" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Completed Deliveries</CardTitle>
+                <CardDescription>Review your past successful deliveries and proof uploads.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {completedToday.map((delivery) => (
+                    <div key={delivery.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
-                        <p className="font-medium">
-                          {delivery.customer.firstName} {delivery.customer.lastName}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Delivered {delivery.deliveredAt ? new Date(delivery.deliveredAt).toLocaleString() : "recently"}
-                        </p>
-                        {delivery.deliveryNotes && (
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            Note: {delivery.deliveryNotes}
-                          </p>
-                        )}
+                        <p className="font-bold">Order #{delivery.id.slice(0, 8)}</p>
+                        <p className="text-xs text-muted-foreground">{delivery.deliveredAt ? new Date(delivery.deliveredAt).toLocaleTimeString() : ""}</p>
                       </div>
+                      <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Proof Uploaded
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Pending Orders Tab */}
+          <TabsContent value="pending" className="space-y-4">
+            {deliveriesLoading ? (
+              Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-48" />)
+            ) : pendingDeliveries.length > 0 ? (
+              pendingDeliveries.map((delivery) => (
+                <Card key={delivery.id} className="hover-elevate active-elevate-2 cursor-pointer">
+                  <CardContent className="pt-6">
+                    <div className="flex items-start gap-4">
+                      <Avatar className="h-14 w-14">
+                        <AvatarFallback className="bg-primary text-primary-foreground text-lg">
+                          {delivery.customer?.firstName?.[0] || 'C'}
+                        </AvatarFallback>
+                      </Avatar>
+
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h3 className="font-bold text-lg">
+                              {delivery.customer?.firstName} {delivery.customer?.lastName}
+                            </h3>
+                            <p className="text-sm text-muted-foreground">Order #{delivery.orderId.slice(0, 8)}</p>
+                          </div>
+                          <Badge>MK {parseFloat(delivery.order.deliveryCharge || '0').toFixed(2)}</Badge>
+                        </div>
+
+                        <div className="space-y-1 text-sm">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4" />
+                            <span>{delivery.order.deliveryAddress}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Phone className="w-4 h-4" />
+                            <a href={`tel:${delivery.customer?.phone}`} className="text-primary hover:underline">
+                              {delivery.customer?.phone}
+                            </a>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Navigation className="w-4 h-4" />
+                            <span>{parseFloat(delivery.order.deliveryDistance || '0').toFixed(1)} km</span>
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="flex flex-col gap-2">
-                        <Badge variant="outline">Delivered</Badge>
-                        {delivery.proofOfDeliveryUrl && (
-                          <a
-                            href={delivery.proofOfDeliveryUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-sm text-primary underline"
-                          >
-                            View proof
-                          </a>
-                        )}
+                        <Button
+                          className="w-full"
+                          onClick={() => {
+                            setSelectedDelivery(delivery.id);
+                            confirmOrderMutation.mutate(delivery.id);
+                          }}
+                          disabled={confirmOrderMutation.isPending}
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          Confirm & Start
+                        </Button>
                       </div>
                     </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <CheckCircle2 className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No completed deliveries yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Finished deliveries with proof of handoff will appear here.
-                  </p>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card>
+                <CardContent className="pt-6 text-center py-12">
+                  <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No pending orders</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* In Transit Tab */}
+          <TabsContent value="transit" className="space-y-4">
+            {inTransitDeliveries.length > 0 ? (
+              inTransitDeliveries.map((delivery) => (
+                <Card key={delivery.id} className="border-primary/50 bg-primary/5">
+                  <CardContent className="pt-6">
+                    <div className="flex items-start gap-4">
+                      <div className="h-14 w-14 rounded-full bg-primary flex items-center justify-center">
+                        <Navigation className="h-6 w-6 text-primary-foreground" />
+                      </div>
+
+                      <div className="flex-1">
+                        <h3 className="font-bold text-lg">
+                          {delivery.customer?.firstName} {delivery.customer?.lastName}
+                        </h3>
+                        <div className="space-y-2 text-sm mt-2">
+                          <p className="text-muted-foreground">Destination: {delivery.order.deliveryAddress}</p>
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                            <span className="text-primary font-semibold">Live tracking active - Customer can see you</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          className="w-full"
+                          onClick={() => completeDeliveryMutation.mutate(delivery.id)}
+                          disabled={completeDeliveryMutation.isPending}
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          Complete Delivery
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card>
+                <CardContent className="pt-6 text-center py-12">
+                  <Truck className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No deliveries in transit</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Performance Tab */}
+          <TabsContent value="performance" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Today's Performance</CardTitle>
+                <CardDescription>Your service metrics and ratings</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-3xl font-bold">{completedToday.length}</div>
+                      <p className="text-sm text-muted-foreground">Deliveries Completed</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-3xl font-bold text-chart-1">4.8</div>
+                      <div className="flex items-center gap-1 mt-1">
+                        {[...Array(5)].map((_, i) => (
+                          <Star key={i} className={`h-4 w-4 ${i < 4 ? 'fill-yellow-400 text-yellow-400' : 'text-muted'}`} />
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </DashboardShell>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
   );
 }

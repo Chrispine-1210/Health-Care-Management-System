@@ -11,13 +11,11 @@ import { Input } from "@/components/ui/input";
 import { useState, useCallback } from "react";
 import type { Prescription } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
-import { useLocation } from "wouter";
 
 export default function PharmacistPrescriptionsPage() {
   const { toast } = useToast();
   const { isPharmacist, isAuthenticated, isLoading: authLoading } = useAuth();
   const queryClient = useQueryClient();
-  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
@@ -28,7 +26,7 @@ export default function PharmacistPrescriptionsPage() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/login";
+        window.location.href = "/api/login";
       }, 500);
     }
   }, [isAuthenticated, isPharmacist, authLoading, toast]);
@@ -104,9 +102,7 @@ export default function PharmacistPrescriptionsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-bold mb-2">Prescription Review Queue</h1>
-        <p className="text-muted-foreground">
-          Review prescriptions with allergy and condition context before approving medicine handoff.
-        </p>
+        <p className="text-muted-foreground">Manage and review all pending prescriptions</p>
       </div>
 
       <Card>
@@ -161,33 +157,12 @@ export default function PharmacistPrescriptionsPage() {
                     <p className="text-sm text-muted-foreground">
                       {new Date(prescription.createdAt!).toLocaleDateString()} at {new Date(prescription.createdAt!).toLocaleTimeString()}
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {(prescription.patientAllergies?.length ?? 0) > 0 ? (
-                        <Badge variant="destructive">
-                          Allergies: {prescription.patientAllergies!.slice(0, 2).join(", ")}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline">No allergies on file</Badge>
-                      )}
-                      {(prescription.patientConditions?.length ?? 0) > 0 && (
-                        <Badge variant="outline">
-                          Conditions: {prescription.patientConditions!.slice(0, 2).join(", ")}
-                        </Badge>
-                      )}
-                    </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <Badge className={getStatusColor(prescription.status)}>
                       {prescription.status.replace(/_/g, ' ').toUpperCase()}
                     </Badge>
                     <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setLocation(`/pharmacist/prescriptions/${prescription.id}`)}
-                      >
-                        Details
-                      </Button>
                       <Button 
                         size="sm" 
                         variant="outline"

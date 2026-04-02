@@ -66,7 +66,7 @@ export default function Landing() {
             </p>
             <div className="flex flex-wrap gap-4 justify-center pt-4">
               <Button size="lg" className="text-lg px-8" asChild data-testid="button-shop-now">
-                <a href="/login">Shop Medications</a>
+                <a href="/api/login">Shop Medications</a>
               </Button>
               <Button size="lg" variant="outline" className="text-lg px-8" asChild data-testid="button-learn-more">
                 <a href="#features">Learn More</a>
@@ -140,7 +140,7 @@ export default function Landing() {
                 </div>
                 <div className="pt-4 border-t border-border">
                   <Button className="w-full" size="lg" asChild data-testid="button-get-started">
-                    <a href="/login">Get Started Today</a>
+                    <a href="/api/login">Get Started Today</a>
                   </Button>
                 </div>
               </CardContent>

@@ -11,7 +11,7 @@ export default function TrackingPage() {
     const orderId = new URLSearchParams(window.location.search).get('orderId');
     const fetchTracking = async () => {
       try {
-        const token = localStorage.getItem("auth_token");
+        const token = localStorage.getItem('token');
         const res = await fetch(`/api/orders/${orderId}/tracking`, {
           headers: { Authorization: `Bearer ${token}` },
         });

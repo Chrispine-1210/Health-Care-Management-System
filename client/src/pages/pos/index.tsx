@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest } from "@/lib/queryClient";
-import { canUsePointOfSale } from "@shared/roleCapabilities";
 import { 
   Search, 
   Plus, 
@@ -30,30 +29,28 @@ type CartItem = {
 
 export default function POSPage() {
   const { toast } = useToast();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isStaff, isPharmacist, isAdmin, isAuthenticated, isLoading: authLoading } = useAuth();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'cash' | 'airtel_money' | 'tnm_mpamba' | 'card'>('cash');
 
-  const canAccessPointOfSale = canUsePointOfSale(user?.role);
-
   useEffect(() => {
-    if (!authLoading && (!isAuthenticated || !canAccessPointOfSale)) {
+    if (!authLoading && (!isAuthenticated || (!isStaff && !isPharmacist && !isAdmin))) {
       toast({
         title: "Unauthorized",
-        description: "This point-of-sale workspace is available to admin and staff roles only.",
+        description: "You are logged out. Logging in again...",
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/login";
+        window.location.href = "/api/login";
       }, 500);
     }
-  }, [authLoading, canAccessPointOfSale, isAuthenticated, toast]);
+  }, [isAuthenticated, isStaff, isPharmacist, isAdmin, authLoading, toast]);
 
   const { data: products } = useQuery<Product[]>({
     queryKey: ["/api/products"],
-    enabled: isAuthenticated && canAccessPointOfSale,
+    enabled: isAuthenticated && (isStaff || isPharmacist || isAdmin),
   });
 
   const filteredProducts = useMemo(
@@ -93,7 +90,7 @@ export default function POSPage() {
   });
 
   const cartTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + parseFloat(item.product.price) * item.quantity, 0),
+    () => cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
     [cart]
   );
 

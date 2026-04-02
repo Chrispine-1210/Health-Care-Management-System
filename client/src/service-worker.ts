@@ -1,81 +1,54 @@
 /// <reference lib="webworker" />
 
-const sw = self as unknown as ServiceWorkerGlobalScope;
+declare const self: ServiceWorkerGlobalScope;
 
-const CACHE_NAME = "thandizo-shell-v2";
-const APP_SHELL_ASSETS = ["/", "/index.html", "/manifest.json", "/favicon.png"];
+const CACHE_NAME = 'thandizo-v1';
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+];
 
-sw.addEventListener("install", (event: ExtendableEvent) => {
+// Install event - cache static assets
+self.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      await cache.addAll(APP_SHELL_ASSETS);
-    }),
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS).catch(() => {
+        // Gracefully handle failures
+        console.log('Some assets failed to cache');
+      });
+    })
   );
-
-  sw.skipWaiting();
+  self.skipWaiting();
 });
 
-sw.addEventListener("activate", (event: ExtendableEvent) => {
+// Activate event - clean up old caches
+self.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) =>
-      Promise.all(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
         cacheNames
-          .filter((cacheName) => cacheName !== CACHE_NAME)
-          .map((cacheName) => caches.delete(cacheName)),
-      ),
-    ),
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name))
+      );
+    })
   );
-
-  sw.clients.claim();
+  self.clients.claim();
 });
 
-sw.addEventListener("fetch", (event: FetchEvent) => {
-  if (event.request.method !== "GET") {
+// Fetch event - network first, fallback to cache
+self.addEventListener('fetch', (event: FetchEvent) => {
+  // Skip non-GET requests and external URLs
+  if (event.request.method !== 'GET') {
     return;
   }
 
   const url = new URL(event.request.url);
-  const isSameOrigin = url.origin === sw.location.origin;
 
-  if (!isSameOrigin) {
-    return;
-  }
-
-  // Keep authenticated API traffic out of the cache.
-  if (url.pathname.startsWith("/api")) {
-    event.respondWith(
-      fetch(event.request).catch(
-        () =>
-          new Response(JSON.stringify({ success: false, message: "Offline" }), {
-            status: 503,
-            headers: { "Content-Type": "application/json" },
-          }),
-      ),
-    );
-    return;
-  }
-
-  if (event.request.mode === "navigate") {
+  // Network first for API calls
+  if (url.pathname.startsWith('/api')) {
     event.respondWith(
       fetch(event.request)
-        .then((response) => {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put("/index.html", responseClone);
-          });
-          return response;
-        })
-        .catch(async () => {
-          const cachedShell = await caches.match("/index.html");
-          return cachedShell || Response.error();
-        }),
-    );
-    return;
-  }
-
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const networkResponse = fetch(event.request)
         .then((response) => {
           if (response.ok) {
             const responseClone = response.clone();
@@ -85,48 +58,62 @@ sw.addEventListener("fetch", (event: FetchEvent) => {
           }
           return response;
         })
-        .catch(() => cachedResponse || Response.error());
-
-      return cachedResponse || networkResponse;
-    }),
-  );
-});
-
-sw.addEventListener("push", (event: PushEvent) => {
-  if (!event.data) {
+        .catch(() => {
+          return caches.match(event.request).then((cached) => {
+            return cached || new Response('Offline - cached data unavailable', { status: 503 });
+          });
+        })
+    );
     return;
   }
 
-  const data = event.data.json();
-  const options: NotificationOptions = {
-    body: data.body || "New update from Thandizo Pharmacy",
-    icon: "/favicon.png",
-    badge: "/favicon.png",
-    tag: data.tag || "thandizo-notification",
-    requireInteraction: Boolean(data.requireInteraction),
-  };
-
-  event.waitUntil(
-    sw.registration.showNotification(data.title || "Thandizo Pharmacy", options),
+  // Cache first for static assets
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      return cached || fetch(event.request).then((response) => {
+        if (response.ok) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return response;
+      });
+    })
   );
 });
 
-sw.addEventListener("notificationclick", (event: NotificationEvent) => {
+// Message handling for push notifications (future)
+self.addEventListener('push', (event: PushEvent) => {
+  if (!event.data) return;
+
+  const data = event.data.json();
+  const options = {
+    body: data.body || 'New notification from Thandizo Pharmacy',
+    icon: '/manifest.json',
+    badge: '/manifest.json',
+    tag: data.tag || 'notification',
+    requireInteraction: data.requireInteraction || false,
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Thandizo Pharmacy', options)
+  );
+});
+
+// Notification click handling
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   event.waitUntil(
-    sw.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients: readonly Client[]) => {
-      const existingClient = clients[0];
-
-      if (existingClient && "focus" in existingClient) {
-        return (existingClient as WindowClient).focus().then(() => {
-          if ("navigate" in existingClient) {
-            return (existingClient as WindowClient).navigate("/notifications");
-          }
-          return undefined;
-        });
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('navigate' in client) {
+          return (client as WindowClient).navigate('/orders');
+        }
       }
-
-      return sw.clients.openWindow("/notifications");
-    }),
+      if (clients.openWindow) {
+        return clients.openWindow('/orders');
+      }
+    })
   );
 });

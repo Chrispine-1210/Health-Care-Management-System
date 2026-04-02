@@ -30,10 +30,10 @@ export default function PharmacistPrescriptionDetailPage() {
         variant: "destructive",
       });
       setTimeout(() => {
-        setLocation("/login");
+        window.location.href = "/api/login";
       }, 500);
     }
-  }, [isAuthenticated, isPharmacist, authLoading, toast, setLocation]);
+  }, [isAuthenticated, isPharmacist, authLoading, toast]);
 
   const { data: prescription, isLoading } = useQuery<Prescription>({
     queryKey: ["/api/prescriptions", id],

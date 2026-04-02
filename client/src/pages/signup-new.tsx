@@ -1,22 +1,18 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { getPostLoginRoute, storeAuthenticatedSession } from "@/lib/authSession";
-import { getAllRoleDefinitions, type PlatformRole } from "@shared/roleCapabilities";
 
 export default function SignupNew() {
-  const roleOptions = getAllRoleDefinitions();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
-    confirmPassword: "",
     firstName: "",
     lastName: "",
-    role: "" as PlatformRole | "",
+    role: "customer",
   });
   const [loading, setLoading] = useState(false);
   const [, navigate] = useLocation();
@@ -27,61 +23,30 @@ export default function SignupNew() {
     setLoading(true);
 
     try {
-      if (formData.password !== formData.confirmPassword) {
-        throw new Error("Passwords do not match");
-      }
-
-      if (!/(?=.*[A-Za-z])(?=.*\d)/.test(formData.password)) {
-        throw new Error("Password must include both letters and numbers");
-      }
-
-      if (!formData.role) {
-        throw new Error("Select the account role you want to create.");
-      }
-
-      const normalizedEmail = formData.email.trim().toLowerCase();
-      const firstName = formData.firstName.trim();
-      const lastName = formData.lastName.trim();
-
-      const registerRes = await fetch("/api/auth/sign-up", {
+      const res = await fetch("/api/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: normalizedEmail,
-          password: formData.password,
-          firstName,
-          lastName,
-          role: formData.role,
-        }),
+        body: JSON.stringify(formData),
       });
 
-      const result = await registerRes.json();
-      if (!registerRes.ok) {
-        throw new Error(result.message || "Sign up failed");
+      if (!res.ok) {
+        throw new Error("Signup failed");
       }
-      storeAuthenticatedSession({
-        token: result.data.token,
-        refreshToken: result.data.refreshToken,
-        user: result.data.user,
-      });
+
+      const { token } = await res.json();
+      localStorage.setItem("auth_token", token);
       
       toast({
         title: "Success",
         description: "Account created successfully",
       });
       
-      const selectedRole = result.data.user?.role;
-      if (selectedRole === "driver") {
-        navigate("/onboarding/driver");
-      } else if (selectedRole === "pharmacist") {
-        navigate("/onboarding/pharmacist");
-      } else {
-        navigate(getPostLoginRoute(selectedRole));
-      }
+      navigate("/");
+      window.location.reload();
     } catch (error) {
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Sign up failed. Please try again.",
+        description: "Signup failed. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -94,46 +59,10 @@ export default function SignupNew() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Sign Up - Thandizo Pharmacy</CardTitle>
-          <CardDescription>Create your account and select the role that matches your work.</CardDescription>
+          <CardDescription>Create your account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignup} className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Choose your account role</p>
-                {formData.role && (
-                  <Badge variant="outline">
-                    {roleOptions.find((role) => role.role === formData.role)?.label ?? "Selected"}
-                  </Badge>
-                )}
-              </div>
-              <div className="grid gap-3">
-                {roleOptions.map((roleOption) => {
-                  const isSelected = formData.role === roleOption.role;
-                  return (
-                    <button
-                      type="button"
-                      key={roleOption.role}
-                      onClick={() => setFormData({ ...formData, role: roleOption.role })}
-                      className={`rounded-lg border p-3 text-left transition ${
-                        isSelected
-                          ? "border-primary bg-primary/5 shadow-sm"
-                          : "border-border/70 hover:border-primary/50"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">{roleOption.label}</p>
-                          <p className="text-xs text-muted-foreground">{roleOption.headline}</p>
-                        </div>
-                        {isSelected && <Badge className="h-fit" variant="outline">Selected</Badge>}
-                      </div>
-                      <p className="mt-2 text-xs text-muted-foreground">{roleOption.summary}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
             <div className="grid grid-cols-2 gap-2">
               <Input
                 type="text"
@@ -166,26 +95,26 @@ export default function SignupNew() {
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              minLength={8}
               data-testid="input-password"
             />
-            <Input
-              type="password"
-              placeholder="Confirm Password"
-              value={formData.confirmPassword}
-              onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-              required
-              minLength={8}
-              data-testid="input-confirm-password"
-            />
+            <Select value={formData.role} onValueChange={(role) => setFormData({ ...formData, role })}>
+              <SelectTrigger data-testid="select-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="customer">Customer</SelectItem>
+                <SelectItem value="staff">Staff</SelectItem>
+                <SelectItem value="driver">Driver</SelectItem>
+              </SelectContent>
+            </Select>
             <Button type="submit" disabled={loading} className="w-full" data-testid="button-signup">
               {loading ? "Creating account..." : "Sign Up"}
             </Button>
             <div className="text-center text-sm">
               Already have an account?{" "}
-              <Link href="/sign-in">
-                <span className="cursor-pointer text-primary hover:underline">Sign in</span>
-              </Link>
+              <a href="/login" className="text-primary hover:underline">
+                Login
+              </a>
             </div>
           </form>
         </CardContent>

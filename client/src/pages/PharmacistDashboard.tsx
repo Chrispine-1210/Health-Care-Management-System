@@ -12,7 +12,7 @@ export default function PharmacistDashboard() {
   useEffect(() => {
     const fetchPrescriptions = async () => {
       try {
-        const token = localStorage.getItem("auth_token");
+        const token = localStorage.getItem('token');
         const res = await fetch('/api/prescriptions', {
           headers: { Authorization: `Bearer ${token}` },
         });

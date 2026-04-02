@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -28,7 +28,7 @@ export default function StaffDashboard() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/login";
+        window.location.href = "/api/login";
       }, 500);
     }
   }, [isAuthenticated, isStaff, authLoading, toast]);
@@ -53,7 +53,7 @@ export default function StaffDashboard() {
           <h1 className="text-3xl font-bold mb-2">Staff Dashboard</h1>
           <p className="text-muted-foreground">Manage point-of-sale and inventory</p>
         </div>
-        <a href="/staff/pos">
+        <a href="/pos">
           <Button size="lg" data-testid="button-open-pos">
             <ShoppingCart className="h-5 w-5 mr-2" />
             Open POS Terminal
@@ -128,7 +128,7 @@ export default function StaffDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <a href="/staff/pos">
+              <a href="/pos">
                 <Button variant="outline" size="sm" className="w-full">
                   POS Terminal
                 </Button>
@@ -150,7 +150,7 @@ export default function StaffDashboard() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <a href="/staff/pos">
+            <a href="/pos">
               <Button className="w-full" size="lg">
                 <ShoppingCart className="h-4 w-4 mr-2" />
                 New Sale
@@ -202,4 +202,3 @@ export default function StaffDashboard() {
     </div>
   );
 }
-

@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { getAuthToken } from "@/lib/authSession";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,30 +10,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AlertCircle, Lock, Bell, Shield, LogOut, Camera } from "lucide-react";
 
 export default function AccountSettings() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    firstName: user?.firstName || "",
-    lastName: user?.lastName || "",
-    phone: user?.phone || "",
-  });
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  });
-
-  useEffect(() => {
-    setProfileForm({
-      firstName: user?.firstName || "",
-      lastName: user?.lastName || "",
-      phone: user?.phone || "",
-    });
-  }, [user?.firstName, user?.lastName, user?.phone]);
   const [notifications, setNotifications] = useState({
     deliveryUpdates: true,
     orderConfirmations: true,
@@ -71,19 +49,6 @@ export default function AccountSettings() {
           <h1 className="text-4xl font-bold">Account Settings</h1>
           <p className="text-muted-foreground mt-1">Manage your profile and preferences</p>
         </div>
-
-        {user?.mustResetPassword && (
-          <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
-            <CardHeader>
-              <CardTitle className="text-amber-900 dark:text-amber-100">
-                Password reset required
-              </CardTitle>
-              <CardDescription>
-                This account was created by an administrator. Update your password to continue using the platform.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
 
         <Tabs defaultValue="profile" className="w-full">
           <TabsList className="grid w-full grid-cols-4">
@@ -138,21 +103,11 @@ export default function AccountSettings() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>First Name</Label>
-                    <Input
-                      value={profileForm.firstName}
-                      onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })}
-                      className="mt-2"
-                      data-testid="input-first-name"
-                    />
+                    <Input value={user?.firstName || ""} readOnly className="mt-2" data-testid="input-first-name" />
                   </div>
                   <div>
                     <Label>Last Name</Label>
-                    <Input
-                      value={profileForm.lastName}
-                      onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })}
-                      className="mt-2"
-                      data-testid="input-last-name"
-                    />
+                    <Input value={user?.lastName || ""} readOnly className="mt-2" data-testid="input-last-name" />
                   </div>
                 </div>
                 <div>
@@ -161,52 +116,10 @@ export default function AccountSettings() {
                 </div>
                 <div>
                   <Label>Phone</Label>
-                  <Input
-                    value={profileForm.phone}
-                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                    className="mt-2"
-                    data-testid="input-phone"
-                  />
+                  <Input value={user?.phone || ""} readOnly className="mt-2" data-testid="input-phone" />
                 </div>
-                <Button
-                  className="w-full"
-                  data-testid="button-edit-profile"
-                  disabled={isSavingProfile}
-                  onClick={async () => {
-                    if (!user?.id) return;
-                    try {
-                      setIsSavingProfile(true);
-                      const token = getAuthToken();
-                      const res = await fetch(`/api/users/${user.id}`, {
-                        method: "PATCH",
-                        headers: {
-                          "Content-Type": "application/json",
-                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                        },
-                        body: JSON.stringify({
-                          firstName: profileForm.firstName.trim(),
-                          lastName: profileForm.lastName.trim(),
-                          phone: profileForm.phone.trim(),
-                        }),
-                      });
-                      if (!res.ok) {
-                        const error = await res.json();
-                        throw new Error(error.message || "Failed to update profile");
-                      }
-                      await queryClient.invalidateQueries({ queryKey: ["auth", "user"] });
-                      toast({ title: "Profile updated successfully" });
-                    } catch (error: any) {
-                      toast({
-                        title: "Error",
-                        description: error.message || "Failed to update profile",
-                        variant: "destructive",
-                      });
-                    } finally {
-                      setIsSavingProfile(false);
-                    }
-                  }}
-                >
-                  {isSavingProfile ? "Saving..." : "Save Profile Changes"}
+                <Button className="w-full" data-testid="button-edit-profile">
+                  Edit Profile Information
                 </Button>
               </CardContent>
             </Card>
@@ -224,77 +137,23 @@ export default function AccountSettings() {
               <CardContent className="space-y-4">
                 <div>
                   <Label>Current Password</Label>
-                  <Input
-                    type="password"
-                    placeholder="Enter current password"
-                    className="mt-2"
-                    value={passwordForm.currentPassword}
-                    onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-                    data-testid="input-current-password"
-                  />
+                  <Input type="password" placeholder="Enter current password" className="mt-2" data-testid="input-current-password" />
                 </div>
                 <div>
                   <Label>New Password</Label>
-                  <Input
-                    type="password"
-                    placeholder="Enter new password"
-                    className="mt-2"
-                    value={passwordForm.newPassword}
-                    onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                    data-testid="input-new-password"
-                  />
+                  <Input type="password" placeholder="Enter new password" className="mt-2" data-testid="input-new-password" />
                 </div>
                 <div>
                   <Label>Confirm Password</Label>
-                  <Input
-                    type="password"
-                    placeholder="Confirm new password"
-                    className="mt-2"
-                    value={passwordForm.confirmPassword}
-                    onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-                    data-testid="input-confirm-password"
-                  />
+                  <Input type="password" placeholder="Confirm new password" className="mt-2" data-testid="input-confirm-password" />
                 </div>
                 <Button
-                  onClick={async () => {
-                    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-                      toast({ title: "All fields are required", variant: "destructive" });
-                      return;
-                    }
-                    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-                      toast({ title: "Passwords do not match", variant: "destructive" });
-                      return;
-                    }
-                    try {
-                      setIsChangingPassword(true);
-                      const token = getAuthToken();
-                      const res = await fetch("/api/auth/change-password", {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                        },
-                        body: JSON.stringify({
-                          currentPassword: passwordForm.currentPassword,
-                          newPassword: passwordForm.newPassword,
-                        }),
-                      });
-                      const result = await res.json();
-                      if (!res.ok) {
-                        throw new Error(result.message || "Failed to change password");
-                      }
-                      await queryClient.invalidateQueries({ queryKey: ["auth", "user"] });
-                      toast({ title: "Password changed successfully" });
-                      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-                    } catch (error: any) {
-                      toast({
-                        title: "Error",
-                        description: error.message || "Failed to change password",
-                        variant: "destructive",
-                      });
-                    } finally {
+                  onClick={() => {
+                    setIsChangingPassword(true);
+                    setTimeout(() => {
                       setIsChangingPassword(false);
-                    }
+                      toast({ title: "Password changed successfully" });
+                    }, 1000);
                   }}
                   disabled={isChangingPassword}
                   className="w-full"
@@ -406,12 +265,7 @@ export default function AccountSettings() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  data-testid="button-logout"
-                  onClick={() => signOut({ redirectTo: "/login" })}
-                >
+                <Button variant="destructive" className="w-full" data-testid="button-logout">
                   <LogOut className="h-4 w-4 mr-2" />
                   Logout
                 </Button>

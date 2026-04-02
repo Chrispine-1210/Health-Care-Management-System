@@ -12,13 +12,11 @@ import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing-redesigned";
 import LoginNew from "@/pages/login-new";
 import SignupNew from "@/pages/signup-new";
-import SignOutPage from "@/pages/sign-out";
-import BlogPage from "@/pages/blog";
-import PartnersPage from "@/pages/partners";
-import TeamPage from "@/pages/team";
-import TestimonialsPage from "@/pages/testimonials";
-import GalleryPage from "@/pages/gallery";
+import DebugTest from "@/pages/debug-test";
+import EmailDemo from "@/pages/email-demo";
 import CustomerHome from "@/pages/customer/home";
+import SignInDemo from "@/pages/auth/sign-in-updated";
+import SignUp from "@/pages/auth/sign-up";
 import CustomerShop from "@/pages/customer/shop";
 import CustomerOrders from "@/pages/customer/orders";
 import CustomerOrderDetail from "@/pages/customer/order-detail";
@@ -28,7 +26,8 @@ import ProfileEditPage from "@/pages/customer/profile-edit";
 import CartPage from "@/pages/customer/cart";
 import CheckoutPage from "@/pages/customer/checkout";
 import ConsultationsPage from "@/pages/customer/consultations";
-import NotificationsPage from "@/pages/NotificationsPage";
+import RoleTester from "@/pages/role-tester";
+import RoleTestDashboard from "@/pages/role-test-dashboard";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminInventory from "@/pages/admin/inventory";
 import AdminUsersPage from "@/pages/admin/users";
@@ -40,16 +39,12 @@ import AdminContent from "@/pages/admin/content";
 import AdminSettings from "@/pages/admin/settings";
 import PharmacistDashboard from "@/pages/pharmacist/dashboard-new";
 import PharmacistPrescriptions from "@/pages/pharmacist/prescriptions";
-import PharmacistPrescriptionDetailPage from "@/pages/pharmacist/prescription-detail";
 import PharmacistInventory from "@/pages/pharmacist/inventory";
 import StaffDashboard from "@/pages/staff/dashboard-new";
 import StaffOrders from "@/pages/staff/orders";
 import DriverDashboard from "@/pages/driver/dashboard-new";
-import DeliveryUpdatePage from "@/pages/driver/delivery-update";
 import DriverHistory from "@/pages/driver/history";
 import POSPage from "@/pages/pos";
-import DriverOnboarding from "@/pages/onboarding/driver-onboarding";
-import PharmacistOnboarding from "@/pages/onboarding/pharmacist-onboarding";
 import NationalIDVerification from "@/pages/verification/national-id";
 import FaceScanVerification from "@/pages/verification/face-scan";
 import PhoneOTPVerification from "@/pages/verification/phone-otp";
@@ -64,10 +59,6 @@ import CustomerPortfolioProfile from "@/pages/portfolio/customer-profile";
 import { ChatWidget } from "@/components/ChatWidget";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
-import { SeoManager } from "@/components/SeoManager";
-import { CookieConsentBanner } from "@/components/CookieConsentBanner";
-import { RoleRedirect } from "@/components/RoleRedirect";
-import { canUsePointOfSale } from "@shared/roleCapabilities";
 
 function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -89,15 +80,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Router() {
-  const { user, isAuthenticated, isLoading, isCustomer, isAdmin, isPharmacist, isStaff, isDriver } = useAuth();
-  const canAccessPointOfSale = canUsePointOfSale(user?.role);
-  const dashboardTargets = {
-    admin: "/admin",
-    pharmacist: "/pharmacist",
-    staff: "/staff",
-    driver: "/driver",
-    customer: "/customer",
-  };
+  const { isAuthenticated, isLoading, isCustomer, isAdmin, isPharmacist, isStaff, isDriver } = useAuth();
 
   if (isLoading) {
     return (
@@ -111,33 +94,15 @@ function Router() {
   if (!isAuthenticated) {
     return (
       <Switch>
+        <Route path="/debug" component={DebugTest} />
+        <Route path="/email-demo" component={EmailDemo} />
         <Route path="/" component={Landing} />
-        <Route path="/blog" component={BlogPage} />
-        <Route path="/partners" component={PartnersPage} />
-        <Route path="/team" component={TeamPage} />
-        <Route path="/testimonials" component={TestimonialsPage} />
-        <Route path="/gallery" component={GalleryPage} />
         <Route path="/login" component={LoginNew} />
         <Route path="/signup" component={SignupNew} />
-        <Route path="/sign-in" component={LoginNew} />
-        <Route path="/sign-up" component={SignupNew} />
-        <Route path="/signout" component={SignOutPage} />
-        <Route path="/sign-out" component={SignOutPage} />
+        <Route path="/sign-in" component={SignInDemo} />
+        <Route path="/sign-up" component={SignUp} />
         <Route>
           <Redirect to="/login" />
-        </Route>
-      </Switch>
-    );
-  }
-
-  if (user?.mustResetPassword) {
-    return (
-      <Switch>
-        <Route path="/settings/account" component={AccountSettings} />
-        <Route path="/signout" component={SignOutPage} />
-        <Route path="/sign-out" component={SignOutPage} />
-        <Route>
-          <Redirect to="/settings/account" />
         </Route>
       </Switch>
     );
@@ -159,13 +124,18 @@ function Router() {
       {isPharmacist && <Route path="/performance/pharmacist" component={PharmacistPerformance} />}
       {isStaff && <Route path="/performance/staff" component={StaffPerformance} />}
       {isAdmin && <Route path="/performance/admin" component={AdminPerformance} />}
-    </>
-  );
-
-  const onboardingRoutes = (
-    <>
-      {isDriver && <Route path="/onboarding/driver" component={DriverOnboarding} />}
-      {isPharmacist && <Route path="/onboarding/pharmacist" component={PharmacistOnboarding} />}
+      <Route path="/pharmacist/inventory">
+        <AdminLayout><PharmacistInventory /></AdminLayout>
+      </Route>
+      <Route path="/pharmacist/prescriptions">
+        <AdminLayout><PharmacistPrescriptions /></AdminLayout>
+      </Route>
+      <Route path="/staff/orders">
+        <AdminLayout><StaffOrders /></AdminLayout>
+      </Route>
+      <Route path="/driver/history">
+        <AdminLayout><DriverHistory /></AdminLayout>
+      </Route>
     </>
   );
 
@@ -179,51 +149,38 @@ function Router() {
     </>
   );
 
+  // Online users for chat
+  const onlineUsers = [
+    { id: "driver-1", name: "Mthunzi", role: "driver", status: "online" as const },
+    { id: "pharma-1", name: "Dr. Banda", role: "pharmacist", status: "online" as const },
+    { id: "staff-1", name: "Gift", role: "staff", status: "online" as const },
+    { id: "admin-1", name: "Admin", role: "admin", status: "online" as const },
+  ];
+
   // Customer routes
   if (isCustomer) {
     return (
       <>
         <Switch>
-          <Route path="/signout" component={SignOutPage} />
-          <Route path="/sign-out" component={SignOutPage} />
-          <Route path="/customer" component={CustomerHome} />
-          <Route path="/customer/dashboard" component={CustomerHome} />
-          <Route path="/dashboard">
-            <RoleRedirect targets={dashboardTargets} />
-          </Route>
-          <Route path="/customer/shop" component={CustomerShop} />
-          <Route path="/customer/cart" component={CartPage} />
-          <Route path="/customer/checkout" component={CheckoutPage} />
-          <Route path="/customer/notifications" component={NotificationsPage} />
-          <Route path="/customer/orders/:id" component={CustomerOrderDetail} />
-          <Route path="/customer/orders" component={CustomerOrders} />
-          <Route path="/customer/prescriptions" component={CustomerPrescriptions} />
-          <Route path="/customer/consultations" component={ConsultationsPage} />
-          <Route path="/customer/profile/edit" component={ProfileEditPage} />
-          <Route path="/customer/profile/view" component={CustomerPortfolioProfile} />
-          <Route path="/customer/profile" component={CustomerProfile} />
-          <Route path="/">
-            <RoleRedirect targets={dashboardTargets} />
-          </Route>
+          <Route path="/" component={CustomerHome} />
           <Route path="/shop" component={CustomerShop} />
           <Route path="/cart" component={CartPage} />
           <Route path="/checkout" component={CheckoutPage} />
-          <Route path="/notifications">
-            <RoleRedirect targets={{ customer: "/customer/notifications" }} />
-          </Route>
           <Route path="/orders" component={CustomerOrders} />
           <Route path="/orders/:id" component={CustomerOrderDetail} />
           <Route path="/prescriptions" component={CustomerPrescriptions} />
           <Route path="/consultations" component={ConsultationsPage} />
           <Route path="/profile" component={CustomerProfile} />
           <Route path="/profile/edit" component={ProfileEditPage} />
+          <Route path="/role-tester" component={RoleTester} />
+          <Route path="/role-test" component={RoleTestDashboard} />
           {verificationRoutes}
           {performanceRoutes}
           {accountRoutes}
           <Route path="/performance/customer" component={CustomerPortfolioProfile} />
           <Route component={NotFound} />
         </Switch>
-        <ChatWidget />
+        <ChatWidget onlinUsers={onlineUsers} />
       </>
     );
   }
@@ -231,34 +188,14 @@ function Router() {
   return (
     <>
       <Switch>
-        <Route path="/signout" component={SignOutPage} />
-        <Route path="/sign-out" component={SignOutPage} />
-        {onboardingRoutes}
-        <Route path="/pos">
-          <RoleRedirect targets={{ admin: "/admin/pos", staff: "/staff/pos" }} />
-        </Route>
-        <Route path="/notifications">
-          <RoleRedirect
-            targets={{
-              admin: "/admin/inbox",
-              pharmacist: "/pharmacist/inbox",
-              staff: "/staff/inbox",
-              driver: "/driver/inbox",
-              customer: "/customer/notifications",
-            }}
-          />
-        </Route>
-        <Route path="/dashboard">
-          <RoleRedirect targets={dashboardTargets} />
-        </Route>
+        <Route path="/pos" component={POSPage} />
+        {/* Role tester accessible to all non-customer authenticated users */}
+        <Route path="/role-tester" component={RoleTester} />
+        <Route path="/role-test" component={RoleTestDashboard} />
         <Route path="/settings/account" component={AccountSettings} />
         
-      {isAdmin && (
+        {isAdmin && (
         <>
-          {canAccessPointOfSale && <Route path="/admin/pos" component={POSPage} />}
-          <Route path="/admin/inbox">
-            <AdminLayout><NotificationsPage /></AdminLayout>
-          </Route>
           <Route path="/admin">
             <AdminLayout><AdminDashboard /></AdminLayout>
           </Route>
@@ -292,16 +229,13 @@ function Router() {
           <Route path="/performance/admin">
             <AdminLayout><AdminPerformance /></AdminLayout>
           </Route>
-          <Route path="/admin/performance">
+          <Route path="/performance/admin">
             <AdminLayout><AdminPerformance /></AdminLayout>
           </Route>
         </>
       )}
       {isPharmacist && (
         <>
-          <Route path="/pharmacist/inbox">
-            <AdminLayout><NotificationsPage /></AdminLayout>
-          </Route>
           <Route path="/pharmacist">
             <AdminLayout><PharmacistDashboard /></AdminLayout>
           </Route>
@@ -314,29 +248,16 @@ function Router() {
           <Route path="/pharmacist/prescriptions">
             <AdminLayout><PharmacistPrescriptions /></AdminLayout>
           </Route>
-          <Route path="/pharmacist/prescriptions/:id">
-            <AdminLayout><PharmacistPrescriptionDetailPage /></AdminLayout>
-          </Route>
           <Route path="/performance/pharmacist">
             <AdminLayout><PharmacistPerformance /></AdminLayout>
           </Route>
-          <Route path="/pharmacist/performance">
-            <AdminLayout><PharmacistPerformance /></AdminLayout>
-          </Route>
           <Route path="/portfolio/pharmacist">
-            <AdminLayout><PharmacistPortfolio /></AdminLayout>
-          </Route>
-          <Route path="/pharmacist/portfolio">
             <AdminLayout><PharmacistPortfolio /></AdminLayout>
           </Route>
         </>
       )}
       {isStaff && (
         <>
-          {canAccessPointOfSale && <Route path="/staff/pos" component={POSPage} />}
-          <Route path="/staff/inbox">
-            <AdminLayout><NotificationsPage /></AdminLayout>
-          </Route>
           <Route path="/staff">
             <AdminLayout><StaffDashboard /></AdminLayout>
           </Route>
@@ -349,16 +270,11 @@ function Router() {
           <Route path="/performance/staff">
             <AdminLayout><StaffPerformance /></AdminLayout>
           </Route>
-          <Route path="/staff/performance">
-            <AdminLayout><StaffPerformance /></AdminLayout>
-          </Route>
+          <Route path="/pos" component={POSPage} />
         </>
       )}
       {isDriver && (
         <>
-          <Route path="/driver/inbox">
-            <AdminLayout><NotificationsPage /></AdminLayout>
-          </Route>
           <Route path="/driver">
             <AdminLayout><DriverDashboard /></AdminLayout>
           </Route>
@@ -368,32 +284,34 @@ function Router() {
           <Route path="/driver/history">
             <AdminLayout><DriverHistory /></AdminLayout>
           </Route>
-          <Route path="/driver/deliveries/:id">
-            <AdminLayout><DeliveryUpdatePage /></AdminLayout>
-          </Route>
           <Route path="/performance/driver">
-            <AdminLayout><DriverPerformance /></AdminLayout>
-          </Route>
-          <Route path="/driver/performance">
             <AdminLayout><DriverPerformance /></AdminLayout>
           </Route>
           <Route path="/portfolio/driver">
             <AdminLayout><DriverPortfolio /></AdminLayout>
           </Route>
-          <Route path="/driver/portfolio">
-            <AdminLayout><DriverPortfolio /></AdminLayout>
-          </Route>
         </>
       )}
       
+      {/* Default route based on role */}
       <Route path="/">
-        <RoleRedirect targets={dashboardTargets} />
+        {isAdmin ? (
+          <AdminLayout><AdminDashboard /></AdminLayout>
+        ) : isPharmacist ? (
+          <AdminLayout><PharmacistDashboard /></AdminLayout>
+        ) : isStaff ? (
+          <AdminLayout><StaffDashboard /></AdminLayout>
+        ) : isDriver ? (
+          <AdminLayout><DriverDashboard /></AdminLayout>
+        ) : (
+          <AdminLayout><AdminDashboard /></AdminLayout>
+        )}
       </Route>
       {verificationRoutes}
       {accountRoutes}
       <Route component={NotFound} />
       </Switch>
-      <ChatWidget />
+      <ChatWidget onlinUsers={onlineUsers} />
     </>
   );
 }
@@ -409,12 +327,10 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <TooltipProvider>
-              <SidebarProvider style={style as React.CSSProperties}>
-                <Toaster />
-                <SeoManager />
-                <OfflineIndicator />
-                <Router />
-                <CookieConsentBanner />
+            <SidebarProvider style={style as React.CSSProperties}>
+              <Toaster />
+              <OfflineIndicator />
+              <Router />
             </SidebarProvider>
           </TooltipProvider>
         </ThemeProvider>

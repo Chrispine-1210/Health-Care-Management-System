@@ -14,7 +14,7 @@ export default function OrdersPage() {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const token = localStorage.getItem("auth_token");
+        const token = localStorage.getItem('token');
         const res = await fetch('/api/orders', {
           headers: { Authorization: `Bearer ${token}` },
         });

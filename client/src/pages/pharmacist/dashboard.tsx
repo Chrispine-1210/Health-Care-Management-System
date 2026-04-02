@@ -22,7 +22,7 @@ export default function PharmacistDashboard() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/login";
+        window.location.href = "/api/login";
       }, 500);
     }
   }, [isAuthenticated, isPharmacist, authLoading, toast]);

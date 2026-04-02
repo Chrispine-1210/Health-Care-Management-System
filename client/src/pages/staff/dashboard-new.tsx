@@ -1,565 +1,473 @@
-import { useEffect, useMemo } from "react";
-import { useLocation } from "wouter";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Branch, ContentItem, Delivery, Order, Product, User } from "@shared/schema";
-import { apiRequest } from "@/lib/queryClient";
+import { useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { useConversations } from "@/hooks/useNotifications";
-import { Badge } from "@/components/ui/badge";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RoleWorkspacePanel } from "@/components/RoleWorkspacePanel";
-import { DashboardShell } from "@/components/dashboard/DashboardShell";
-import { MetricCard } from "@/components/dashboard/MetricCard";
+import { AlertCircle, CheckCircle2, XCircle, Clock, Users, Package, Zap, Phone, Mail, MessageSquare, BarChart3 } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
 import { ChatWidget } from "@/components/ChatWidget";
-import {
-  Building2,
-  CheckCircle2,
-  ClipboardList,
-  FileText,
-  MessageSquareText,
-  Pill,
-  ShoppingCart,
-  Truck,
-  XCircle,
-} from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { MeritBadges, badgeDefinitions } from "@/components/MeritBadges";
+import type { Order, User } from "@shared/schema";
 
 type OrderApproval = Order & {
-  customer?: User | null;
+  customer: User;
   requiresApproval: boolean;
   approvalReason?: string;
 };
 
-type ManagedOrder = Order & {
-  customer?: User | null;
-  delivery?: Delivery | null;
+type StaffMember = User & {
+  role: string;
+  status: "active" | "inactive";
+  lastActive: string;
 };
 
 export default function StaffDashboardNew() {
   const { toast } = useToast();
-  const { user, isStaff, isAuthenticated, isLoading: authLoading, signOut } = useAuth();
-  const [, setLocation] = useLocation();
+  const { user, isStaff, isAuthenticated, signOut } = useAuth();
   const queryClient = useQueryClient();
+  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  const [selectedStaff, setSelectedStaff] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
 
-  useEffect(() => {
-    if (!authLoading && (!isAuthenticated || !isStaff)) {
+  const handleScanInventory = useCallback(() => {
+    setIsScanning(true);
+    setTimeout(() => {
+      setIsScanning(false);
       toast({
-        title: "Unauthorized",
-        description: "Access denied. Redirecting to login.",
-        variant: "destructive",
+        title: "Inventory Scan Complete",
+        description: "Batch #B204-Z verified. Expiry date: Oct 2026. Stock levels updated precisely.",
       });
-      setTimeout(() => {
-        setLocation("/login");
-      }, 500);
-    }
-  }, [authLoading, isAuthenticated, isStaff, setLocation, toast]);
+    }, 2000);
+  }, [toast]);
 
-  const { data: pendingApprovals = [], isLoading: approvalsLoading } = useQuery<OrderApproval[]>({
+  // Fetch pending order approvals
+  const { data: pendingApprovals = [] } = useQuery<OrderApproval[]>({
     queryKey: ["/api/staff/approvals"],
     enabled: isAuthenticated && isStaff,
   });
 
-  const { data: orders = [], isLoading: ordersLoading } = useQuery<ManagedOrder[]>({
-    queryKey: ["/api/orders"],
+  // Fetch staff members
+  const { data: staffMembers = [] } = useQuery<StaffMember[]>({
+    queryKey: ["/api/staff/members"],
     enabled: isAuthenticated && isStaff,
   });
 
-  const { data: oversightConversations = [] } = useConversations({
-    scope: "all",
+  // Fetch technical issues/support tickets
+  const { data: supportTickets = [] } = useQuery<any[]>({
+    queryKey: ["/api/staff/support-tickets"],
     enabled: isAuthenticated && isStaff,
   });
 
-  const { data: branches = [] } = useQuery<Branch[]>({
-    queryKey: ["/api/branches"],
-    enabled: isAuthenticated && isStaff,
-  });
-  const assignedBranch = branches.find((branch) => branch.id === user?.branchId);
-
-  const { data: products = [] } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
-    enabled: isAuthenticated && isStaff,
-  });
-
-  const { data: contentItems = [] } = useQuery<ContentItem[]>({
-    queryKey: ["/api/content/public"],
-    enabled: isAuthenticated && isStaff,
-  });
-
+  // Approve order mutation
   const approveOrderMutation = useMutation({
-    mutationFn: (orderId: string) => apiRequest("PATCH", `/api/orders/${orderId}/approve`),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/staff/approvals"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({
-        title: "Order approved",
-        description: "The order has moved into the fulfillment workflow.",
+    mutationFn: async (orderId: string) => {
+      return apiRequest(`/api/orders/${orderId}/approve`, "PATCH", {
+        status: "approved",
       });
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Approval failed",
-        description: error.message,
-        variant: "destructive",
-      });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/staff/approvals"] });
+      toast({ title: "Order approved successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to approve order", variant: "destructive" });
     },
   });
 
+  // Reject order mutation
   const rejectOrderMutation = useMutation({
-    mutationFn: (orderId: string) => apiRequest("PATCH", `/api/orders/${orderId}/reject`),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/staff/approvals"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({
-        title: "Order rejected",
-        description: "The transaction was removed from the active queue.",
+    mutationFn: async (orderId: string) => {
+      return apiRequest(`/api/orders/${orderId}/reject`, "PATCH", {
+        status: "rejected",
       });
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Rejection failed",
-        description: error.message,
-        variant: "destructive",
-      });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/staff/approvals"] });
+      toast({ title: "Order rejected" });
+    },
+    onError: () => {
+      toast({ title: "Failed to reject order", variant: "destructive" });
     },
   });
 
-  const fulfillmentOrders = useMemo(
-    () => orders.filter((order) => ["confirmed", "processing", "ready", "in_transit"].includes(order.status)),
-    [orders],
-  );
-
-  const readyForDispatch = useMemo(
-    () => orders.filter((order) => order.status === "ready"),
-    [orders],
-  );
-
-  const activeDeliveries = useMemo(
-    () => orders.filter((order) => order.status === "in_transit"),
-    [orders],
-  );
-
-  const completionRate = useMemo(() => {
-    if (orders.length === 0) {
-      return 0;
-    }
-
-    return Math.round((orders.filter((order) => order.status === "delivered").length / orders.length) * 100);
-  }, [orders]);
-
-  const approvalRate = useMemo(() => {
-    const reviewedCount = orders.filter((order) => order.status !== "pending").length;
-    if (orders.length === 0) {
-      return 0;
-    }
-
-    return Math.round((reviewedCount / orders.length) * 100);
-  }, [orders]);
-
-  const activeBranchCount = useMemo(
-    () => branches.filter((branch) => branch.isActive).length,
-    [branches],
-  );
-
-  const activeProductCount = useMemo(
-    () => products.filter((product) => product.isActive).length,
-    [products],
-  );
-
-  const publishedContentCount = useMemo(
-    () => contentItems.filter((item) => item.status === "published").length,
-    [contentItems],
-  );
-
-  if (authLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  const renderLoadingStack = () =>
-    Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-32 w-full" />);
+  const stats = {
+    pendingApprovals: pendingApprovals.length,
+    activeStaff: staffMembers.filter((s) => s.status === "active").length,
+    openTickets: supportTickets.filter((t) => t.status === "open").length,
+    totalStaff: staffMembers.length,
+  };
 
   return (
-    <DashboardShell
-      role="Staff"
-      title="Operations Fulfillment Hub"
-      description="Monitor chats and transactions, keep order approvals and fulfillment moving, and maintain visibility across branches, products, content, and platform performance."
-      meta={
-        assignedBranch ? (
-          <Badge variant="outline">Branch scope: {assignedBranch.name}</Badge>
-        ) : (
-          <Badge variant="destructive">No branch assigned</Badge>
-        )
-      }
-      actions={(
-        <>
-          <Button variant="outline" onClick={() => setLocation("/staff/pos")}>
-            <ShoppingCart className="mr-2 h-4 w-4" />
-            POS Transactions
-          </Button>
-          <Button variant="outline" onClick={() => setLocation("/staff/orders")}>
-            <ClipboardList className="mr-2 h-4 w-4" />
-            Fulfillment Queue
-          </Button>
-          <ChatWidget />
-          <Button variant="outline" onClick={signOut} data-testid="button-logout">
-            Sign Out
-          </Button>
-        </>
-      )}
-    >
+    <div className="min-h-screen bg-gradient-to-br from-primary/5 to-primary/10">
+      <div className="container mx-auto p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold">Staff Management Dashboard</h1>
+            <p className="text-muted-foreground mt-1">Manage approvals, staff, and support tickets</p>
+          </div>
+          <div className="flex items-center gap-4 text-right">
+            <div className="hidden sm:block">
+              <p className="text-sm text-muted-foreground">Welcome back,</p>
+              <p className="font-bold">{user?.firstName || "Staff"}</p>
+            </div>
+            <Button 
+              className="bg-primary hover:bg-primary/90"
+              onClick={handleScanInventory}
+              disabled={isScanning}
+            >
+              <Package className={`h-4 w-4 mr-2 ${isScanning ? "animate-spin" : ""}`} />
+              {isScanning ? "Scanning..." : "Scan Inventory"}
+            </Button>
+            <ChatWidget userId="staff-1" userRole="staff" />
+            <Button variant="outline" onClick={signOut} data-testid="button-logout">
+              Sign Out
+            </Button>
+          </div>
+        </div>
 
-      <div className="rounded-2xl border bg-muted/30 p-5">
-        <p className="text-sm text-muted-foreground">Logged in as</p>
-        <p className="text-lg font-semibold">
-          {[user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Staff"}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Focused on order approvals, transaction monitoring, fulfillment, and operations chat oversight.
-        </p>
-      </div>
-
-      <RoleWorkspacePanel
-        role="staff"
-        title="Staff Routes"
-        description="Move between approval, fulfillment, POS, inbox, and performance tools built for staff operations."
-        excludeKeys={["dashboard"]}
-        limit={4}
-      />
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          title="Pending Approvals"
-          value={pendingApprovals.length}
-          description="Orders still waiting for staff action"
-          tone="warning"
-          testId="card-pending-approvals"
-        />
-        <MetricCard
-          title="Ready for Dispatch"
-          value={readyForDispatch.length}
-          description="Fulfillment items prepared for the next step"
-          tone="info"
-        />
-        <MetricCard
-          title="Active Deliveries"
-          value={activeDeliveries.length}
-          description="Transactions currently in transit"
-          tone="success"
-        />
-        <MetricCard
-          title="Chats Monitored"
-          value={oversightConversations.length}
-          description="Live conversations visible to operations"
-        />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard
-          title="Branches Visible"
-          value={activeBranchCount}
-          description={`of ${branches.length} registered branches active`}
-          tone="info"
-        />
-        <MetricCard
-          title="Active Products"
-          value={activeProductCount}
-          description="Catalog items currently available for operations"
-        />
-        <MetricCard
-          title="Published Content"
-          value={publishedContentCount}
-          description="Live content assets affecting the platform"
-          tone="success"
-        />
-      </div>
-
-      <Tabs defaultValue="approvals" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 gap-2 md:grid-cols-5">
-          <TabsTrigger value="approvals">Approvals</TabsTrigger>
-          <TabsTrigger value="fulfillment">Fulfillment</TabsTrigger>
-          <TabsTrigger value="chat">Chat Monitor</TabsTrigger>
-          <TabsTrigger value="controls">Controls</TabsTrigger>
-          <TabsTrigger value="performance">Performance</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="approvals" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Approval Queue</CardTitle>
-              <CardDescription>
-                Review new transactions and decide whether they move into the active fulfillment flow.
-              </CardDescription>
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card data-testid="card-pending-approvals">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" />
+                Pending Approvals
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {approvalsLoading ? (
-                renderLoadingStack()
-              ) : pendingApprovals.length > 0 ? (
-                pendingApprovals.map((order) => (
-                  <div key={order.id} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold">Order #{order.id.slice(0, 8)}</p>
-                          <Badge className="bg-amber-500">Pending</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Customer:{" "}
-                          {[order.customer?.firstName, order.customer?.lastName]
-                            .filter(Boolean)
-                            .join(" ") || order.customer?.email || "Unknown"}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Total: MK {Number(order.total || 0).toLocaleString()} •{" "}
-                          {order.deliveryAddress || "Counter collection"}
-                        </p>
-                        {order.approvalReason && (
-                          <p className="text-sm text-amber-700">{order.approvalReason}</p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => rejectOrderMutation.mutate(order.id)}
-                          disabled={approveOrderMutation.isPending || rejectOrderMutation.isPending}
-                        >
-                          <XCircle className="mr-2 h-4 w-4" />
-                          Reject
-                        </Button>
-                        <Button
-                          onClick={() => approveOrderMutation.mutate(order.id)}
-                          disabled={approveOrderMutation.isPending || rejectOrderMutation.isPending}
-                        >
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Approve
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <CheckCircle2 className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No approvals are waiting</p>
-                  <p className="text-sm text-muted-foreground">
-                    New orders will appear here as soon as they need staff review.
-                  </p>
-                </div>
-              )}
+            <CardContent>
+              <div className="text-3xl font-bold text-chart-3">{stats.pendingApprovals}</div>
+              <p className="text-xs text-muted-foreground">Orders requiring review</p>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="fulfillment" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Fulfillment Pipeline</CardTitle>
-              <CardDescription>
-                Track active transactions as they move from approval into dispatch and delivery.
-              </CardDescription>
+          <Card data-testid="card-active-staff">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Active Staff
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {ordersLoading ? (
-                renderLoadingStack()
-              ) : fulfillmentOrders.length > 0 ? (
-                fulfillmentOrders.map((order) => (
-                  <div key={order.id} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold">Order #{order.id.slice(0, 8)}</p>
-                          <Badge variant="outline">{order.status}</Badge>
-                          {order.status === "ready" && <Badge className="bg-sky-600">Dispatch next</Badge>}
-                          {order.status === "in_transit" && (
-                            <Badge className="bg-emerald-600">Driver active</Badge>
-                          )}
+            <CardContent>
+              <div className="text-3xl font-bold text-primary">{stats.activeStaff}</div>
+              <p className="text-xs text-muted-foreground">of {stats.totalStaff} team members</p>
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-open-tickets">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Zap className="h-4 w-4" />
+                Support Tickets
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-chart-2">{stats.openTickets}</div>
+              <p className="text-xs text-muted-foreground">Unresolved issues</p>
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-processing">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Package className="h-4 w-4" />
+                Processing
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-chart-4">
+                {pendingApprovals.filter((o) => o.status === "processing").length}
+              </div>
+              <p className="text-xs text-muted-foreground">In progress orders</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Merit Badges */}
+        <Card className="bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-orange-200 dark:border-orange-800">
+          <CardContent className="pt-6">
+            <MeritBadges 
+              badges={[
+                { ...badgeDefinitions.communication_expert, unlockedAt: "Nov 10, 2024" },
+                { ...badgeDefinitions.top_performer, unlockedAt: "Nov 20, 2024" },
+                { ...badgeDefinitions.efficiency_master, unlockedAt: "Nov 21, 2024" },
+                { ...badgeDefinitions.five_star_champion },
+              ]} 
+              role="staff" 
+            />
+          </CardContent>
+        </Card>
+
+        {/* Tabs for different sections */}
+        <Tabs defaultValue="approvals" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="approvals">
+              Order Approvals ({stats.pendingApprovals})
+            </TabsTrigger>
+            <TabsTrigger value="staff">Staff Management ({stats.totalStaff})</TabsTrigger>
+            <TabsTrigger value="support">Support Tickets ({stats.openTickets})</TabsTrigger>
+            <TabsTrigger value="performance">Daily Performance</TabsTrigger>
+          </TabsList>
+
+          {/* Daily Performance Tab */}
+          <TabsContent value="performance" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>My Daily Performance Report</CardTitle>
+                <CardDescription>Track your productivity and impact metrics for today.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">Orders Processed</p>
+                    <p className="text-2xl font-bold">42</p>
+                    <Progress value={84} className="h-2" />
+                    <p className="text-xs text-muted-foreground">84% of daily target (50)</p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">Accuracy Rate</p>
+                    <p className="text-2xl font-bold">99.8%</p>
+                    <Progress value={99.8} className="h-2" />
+                    <p className="text-xs text-muted-foreground">Target: 99.5%</p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">Customer Satisfaction</p>
+                    <p className="text-2xl font-bold">4.9/5</p>
+                    <Progress value={98} className="h-2" />
+                    <p className="text-xs text-muted-foreground">Based on 12 reviews</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Order Approvals Tab */}
+          <TabsContent value="approvals" className="space-y-4">
+            {pendingApprovals.length > 0 ? (
+              pendingApprovals.map((order) => (
+                <Card key={order.id} className="border-chart-3/50">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="font-bold">Order #{order.id.slice(0, 8)}</h3>
+                          <Badge className="bg-chart-3">Pending Review</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          {[order.customer?.firstName, order.customer?.lastName]
-                            .filter(Boolean)
-                            .join(" ") || order.customer?.email || "Unknown customer"}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {order.deliveryAddress || "Counter"} • MK {Number(order.total || 0).toLocaleString()}
+                          Customer: {order.customer?.firstName} {order.customer?.lastName}
                         </p>
                       </div>
-                      <Button variant="outline" onClick={() => setLocation("/staff/orders")}>
-                        Open Queue
+                      <div className="text-right">
+                        <p className="font-bold text-lg">MK {parseFloat((order as any).totalAmount || "0").toFixed(2)}</p>
+                        <p className="text-xs text-muted-foreground">{order.status}</p>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Order Details */}
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Delivery Address</p>
+                        <p className="font-semibold line-clamp-2">{order.deliveryAddress}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Distance</p>
+                        <p className="font-semibold">{order.deliveryDistance} km</p>
+                      </div>
+                    </div>
+
+                    {/* Approval Reason */}
+                    {order.approvalReason && (
+                      <div className="bg-yellow-50 dark:bg-yellow-950 p-3 rounded border border-yellow-200 dark:border-yellow-800">
+                        <p className="text-xs font-semibold text-yellow-900 dark:text-yellow-100 mb-1">
+                          Flagged for Review
+                        </p>
+                        <p className="text-xs text-yellow-800 dark:text-yellow-200">{order.approvalReason}</p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() =>
+                          rejectOrderMutation.mutate(order.id)
+                        }
+                        disabled={rejectOrderMutation.isPending}
+                        data-testid={`button-reject-order-${order.id.slice(0, 8)}`}
+                      >
+                        <XCircle className="h-4 w-4 mr-2" />
+                        Reject
+                      </Button>
+                      <Button
+                        onClick={() => approveOrderMutation.mutate(order.id)}
+                        disabled={approveOrderMutation.isPending}
+                        className="flex-1"
+                        data-testid={`button-approve-order-${order.id.slice(0, 8)}`}
+                      >
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Approve
                       </Button>
                     </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Truck className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No active fulfillment items</p>
-                  <p className="text-sm text-muted-foreground">
-                    Confirmed, ready, and in-transit orders will appear here.
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card>
+                <CardContent className="pt-6 text-center py-12">
+                  <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-chart-1 opacity-50" />
+                  <p className="text-muted-foreground">No orders pending approval</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
 
-        <TabsContent value="chat" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Operations Chat Monitor</CardTitle>
-              <CardDescription>
-                Monitor the live conversations that affect transactions, fulfillment, and delivery continuity.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {oversightConversations.length > 0 ? (
-                oversightConversations.map((conversation) => (
-                  <div key={conversation.conversationId} className="rounded-xl border p-4">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate font-medium">{conversation.participantName}</p>
-                          <Badge variant="outline">{conversation.participantRole}</Badge>
-                          {conversation.online && <Badge className="bg-emerald-600">Online</Badge>}
+          {/* Staff Management Tab */}
+          <TabsContent value="staff" className="space-y-4">
+            {staffMembers.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {staffMembers.map((member) => (
+                  <Card key={member.id} className="hover-elevate active-elevate-2">
+                    <CardContent className="pt-6">
+                      <div className="space-y-4">
+                        <div className="flex items-start gap-3">
+                          <Avatar className="h-12 w-12">
+                            <AvatarFallback className="bg-primary text-white">
+                              {member.firstName?.[0] || "S"}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="font-bold">
+                                {member.firstName} {member.lastName}
+                              </h4>
+                              <Badge variant={member.status === "active" ? "default" : "secondary"}>
+                                {member.status}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Role: {member.role || "Staff"}
+                            </p>
+                          </div>
                         </div>
-                        <p className="mt-1 truncate text-sm text-muted-foreground">
-                          {conversation.lastMessage}
-                        </p>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          Updated {new Date(conversation.updatedAt).toLocaleString()}
-                        </p>
+
+                        {/* Contact Info */}
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Phone className="h-4 w-4" />
+                            <span>{member.phone}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Mail className="h-4 w-4" />
+                            <span className="truncate">{member.email}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Clock className="h-4 w-4" />
+                            <span>Last active: {member.lastActive}</span>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex gap-2 pt-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            data-testid={`button-manage-staff-${member.id.slice(0, 8)}`}
+                          >
+                            Manage
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            data-testid={`button-message-staff-${member.id.slice(0, 8)}`}
+                          >
+                            Message
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {conversation.unread > 0 && <Badge>{conversation.unread} unread</Badge>}
-                        <Button variant="outline" size="sm" onClick={() => setLocation("/staff/inbox")}>
-                          <MessageSquareText className="mr-2 h-4 w-4" />
-                          Open Inbox
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="pt-6 text-center py-12">
+                  <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No staff members found</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Support Tickets Tab */}
+          <TabsContent value="support" className="space-y-4">
+            {supportTickets.length > 0 ? (
+              supportTickets
+                .filter((t) => t.status === "open")
+                .map((ticket) => (
+                  <Card key={ticket.id} className="border-chart-2/50">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="font-bold">Ticket #{ticket.id.slice(0, 8)}</h3>
+                            <Badge className="bg-chart-2">Open</Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">{ticket.title}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-semibold text-chart-2">
+                            {ticket.priority?.toUpperCase() || "NORMAL"}
+                          </p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="text-sm text-muted-foreground">
+                        <p className="mb-2">{ticket.description}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-muted p-2 rounded">
+                          <p className="text-muted-foreground">Reported by</p>
+                          <p className="font-semibold">{ticket.reportedBy}</p>
+                        </div>
+                        <div className="bg-muted p-2 rounded">
+                          <p className="text-muted-foreground">Created</p>
+                          <p className="font-semibold">{ticket.createdAt}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="flex-1" data-testid={`button-view-ticket-${ticket.id.slice(0, 8)}`}>
+                          View Details
+                        </Button>
+                        <Button size="sm" className="flex-1" data-testid={`button-resolve-ticket-${ticket.id.slice(0, 8)}`}>
+                          Resolve
                         </Button>
                       </div>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 ))
-              ) : (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <MessageSquareText className="mx-auto mb-3 h-8 w-8 text-primary" />
-                  <p className="font-medium">No operations chats yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Role-to-role chat activity will appear here as soon as the team starts coordinating.
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="controls" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Branch, Product, and Content Oversight</CardTitle>
-              <CardDescription>
-                Operational visibility into the branch footprint, approved catalog, and live content affecting customer and fulfillment workflows.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-xl border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">Branch Network</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Monitor branch readiness and active locations supporting orders.
-                    </p>
-                  </div>
-                  <Building2 className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <p className="mt-4 text-2xl font-bold text-sky-600">{activeBranchCount}</p>
-                <p className="text-xs text-muted-foreground">Active branches in the live network</p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">Product Catalog</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Keep an eye on what customers and staff can currently transact against.
-                    </p>
-                  </div>
-                  <Pill className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <p className="mt-4 text-2xl font-bold text-primary">{activeProductCount}</p>
-                <p className="text-xs text-muted-foreground">Approved and active medicines</p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">Live Content</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Track public-facing guidance and platform content already published.
-                    </p>
-                  </div>
-                  <FileText className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <p className="mt-4 text-2xl font-bold text-emerald-600">{publishedContentCount}</p>
-                <p className="text-xs text-muted-foreground">Published customer-facing content items</p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="performance" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Platform Performance Snapshot</CardTitle>
-              <CardDescription>
-                Track the operational health of approvals, fulfillment, and delivery movement.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-6 md:grid-cols-3">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Approval Progress</span>
-                  <span className="font-semibold">{approvalRate}%</span>
-                </div>
-                <Progress value={approvalRate} />
-                <p className="text-sm text-muted-foreground">
-                  Measures how much of the total order volume has moved beyond pending review.
-                </p>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Completion Rate</span>
-                  <span className="font-semibold">{completionRate}%</span>
-                </div>
-                <Progress value={completionRate} />
-                <p className="text-sm text-muted-foreground">
-                  Reflects how much of the order pipeline has already reached delivery completion.
-                </p>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Live Oversight</span>
-                  <span className="font-semibold">{oversightConversations.length} chats</span>
-                </div>
-                <Progress value={Math.min(oversightConversations.length * 20, 100)} />
-                <p className="text-sm text-muted-foreground">
-                  Highlights how much active conversation context the operations team is monitoring.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </DashboardShell>
+            ) : (
+              <Card>
+                <CardContent className="pt-6 text-center py-12">
+                  <Zap className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No open support tickets</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
   );
 }

@@ -14,7 +14,7 @@ import type { Product } from "@shared/schema";
 import { useState } from "react";
 
 export default function Shop() {
-  const { isAuthenticated, isCustomer, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const { addItem } = useCart();
   const [searchQuery, setSearchQuery] = useState("");
@@ -31,10 +31,10 @@ export default function Shop() {
   });
 
   useEffect(() => {
-    if (!authLoading && (!isAuthenticated || !isCustomer)) {
-      window.location.href = "/login";
+    if (!authLoading && !isAuthenticated) {
+      window.location.href = "/api/login";
     }
-  }, [isAuthenticated, isCustomer, authLoading]);
+  }, [isAuthenticated, authLoading]);
 
   const filteredProducts = useMemo(() => products?.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||

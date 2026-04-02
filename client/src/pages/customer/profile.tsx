@@ -3,10 +3,10 @@ import { CustomerNav } from "@/components/CustomerNav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { User, LogOut } from "lucide-react";
 
 export default function ProfilePage() {
-  const { user, isLoading, signOut } = useAuth();
+  const { user, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -82,14 +82,11 @@ export default function ProfilePage() {
                   Edit Profile
                 </Button>
               </a>
-              <Button
-                variant="destructive"
-                className="w-full"
-                data-testid="button-logout"
-                onClick={() => void signOut()}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
+              <Button asChild variant="destructive" className="w-full" data-testid="button-logout">
+                <a href="/api/logout">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logout
+                </a>
               </Button>
             </div>
           </CardContent>
