@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
-import typescript from "@vitejs/plugin-react";
 
 export default defineConfig({
   build: {
+    target: "es2022",
     lib: {
       entry: "client/src/service-worker.ts",
       name: "ServiceWorker",
@@ -10,7 +10,12 @@ export default defineConfig({
       formats: ["es"],
     },
     outDir: "dist/public",
+    emptyOutDir: false,
     minify: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: "service-worker.js",
+      },
+    },
   },
-  plugins: [typescript()],
 });
