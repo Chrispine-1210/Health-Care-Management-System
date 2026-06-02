@@ -89,7 +89,21 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('index.html') || filePath.endsWith('service-worker.js')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    },
+  }));
+
+  // Fall through to index.html only for browser navigations. Asset misses such as
+  // /service-worker.js should 404 instead of receiving the SPA shell or another
+  // JavaScript bundle, which can leave browsers displaying/caching server code.
+  app.use("*", (req, res, next) => {
+    if (!acceptsHtml(req)) {
+      return next();
+    }
 
   // Fall through to index.html only for browser navigations. Asset misses such as
   // /service-worker.js should 404 instead of receiving the SPA shell or another

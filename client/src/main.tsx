@@ -9,6 +9,22 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
       console.log('Service Worker registration failed (development mode is OK):', error);
     });
   });
+
+  await registration.update();
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+window.addEventListener("load", () => {
+  if (!import.meta.env.PROD) return;
+
+  registerServiceWorker().catch((error) => {
+    console.warn("Service worker maintenance failed:", error);
+  });
+});
+
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error("Application root element #root was not found");
+}
+
+createRoot(rootElement).render(<App />);

@@ -22,18 +22,16 @@ self.addEventListener('install', (event: ExtendableEvent) => {
   self.skipWaiting();
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    caches.keys()
+      .then((cacheNames) => Promise.all(
         cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      );
-    })
+          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+          .map((name) => caches.delete(name)),
+      ))
+      .then(() => self.clients.claim()),
   );
-  self.clients.claim();
 });
 
 function shouldCacheResponse(response: Response) {
@@ -67,29 +65,26 @@ self.addEventListener('fetch', (event: FetchEvent) => {
   if (event.request.method !== 'GET') {
     return;
   }
+}
+
+self.addEventListener('fetch', (event: FetchEvent) => {
+  if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
-
-  if (url.origin !== self.location.origin || url.pathname === '/service-worker.js') {
-    return;
-  }
+  if (url.origin !== self.location.origin || url.pathname === '/service-worker.js') return;
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(networkFirst(event.request, APP_SHELL_URL));
+    event.respondWith(networkOnlyNavigation(event.request));
     return;
   }
 
-  // Network first for API calls
   if (url.pathname.startsWith('/api')) {
     event.respondWith(networkFirst(event.request));
     return;
   }
 
-  if (!STATIC_DESTINATIONS.has(event.request.destination)) {
-    return;
-  }
+  if (!STATIC_DESTINATIONS.has(event.request.destination)) return;
 
-  // Cache first for static assets
   event.respondWith(
     caches.match(event.request).then((cached) => {
       return cached || fetch(event.request).then((response) => {
@@ -101,17 +96,16 @@ self.addEventListener('fetch', (event: FetchEvent) => {
         }
         return response;
       });
-    })
+    }),
   );
 });
 
-// Message handling for push notifications (future)
 self.addEventListener('push', (event: PushEvent) => {
   if (!event.data) return;
 
   const data = event.data.json();
   const options = {
-    body: data.body || 'New notification from Thandizo Pharmacy',
+    body: data.body || 'New notification from Thandizo Healthcare',
     icon: '/manifest.json',
     badge: '/manifest.json',
     tag: data.tag || 'notification',
@@ -119,11 +113,10 @@ self.addEventListener('push', (event: PushEvent) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Thandizo Pharmacy', options)
+    self.registration.showNotification(data.title || 'Thandizo Healthcare', options),
   );
 });
 
-// Notification click handling
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   event.waitUntil(
@@ -136,6 +129,6 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
       if (clients.openWindow) {
         return clients.openWindow('/orders');
       }
-    })
+    }),
   );
 });

@@ -81,6 +81,7 @@ export default function Landing() {
   const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
     staleTime: 5 * 60 * 1000,
+    throwOnError: false,
   });
 
   const featuredProducts = products?.slice(0, 3) ?? [];
@@ -325,7 +326,7 @@ export default function Landing() {
               <Card className="md:col-span-3">
                 <CardContent className="p-8 text-center">
                   <Stethoscope className="mx-auto mb-3 h-10 w-10 text-primary" />
-                  <p className="font-semibold">{isLoading ? "Loading live medicines..." : "Medicine catalog is ready once the API is connected."}</p>
+                  <p className="font-semibold">{isLoading ? "Loading live medicines..." : isError ? "Showing sample catalog while the production API connects." : "Medicine catalog is ready once the API is connected."}</p>
                   <p className="mt-2 text-sm text-muted-foreground">Set VITE_API_BASE_URL in Vercel for the deployed frontend to reach the backend API.</p>
                 </CardContent>
               </Card>
