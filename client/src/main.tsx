@@ -2,35 +2,12 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-const ENABLE_SERVICE_WORKER = import.meta.env.VITE_ENABLE_SERVICE_WORKER === "true";
-const THANDIZO_CACHE_PREFIX = "thandizo-";
-
-async function clearLegacyServiceWorkers() {
-  if (!("serviceWorker" in navigator)) return;
-
-  const registrations = await navigator.serviceWorker.getRegistrations();
-  await Promise.all(registrations.map((registration) => registration.unregister()));
-
-  if ("caches" in window) {
-    const cacheNames = await caches.keys();
-    await Promise.all(
-      cacheNames
-        .filter((cacheName) => cacheName.startsWith(THANDIZO_CACHE_PREFIX))
-        .map((cacheName) => caches.delete(cacheName)),
-    );
-  }
-}
-
-async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
-
-  if (!ENABLE_SERVICE_WORKER) {
-    await clearLegacyServiceWorkers();
-    return;
-  }
-
-  const registration = await navigator.serviceWorker.register("/service-worker.js", {
-    updateViaCache: "none",
+// Register service worker for offline support and PWA
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch((error) => {
+      console.log('Service Worker registration failed (development mode is OK):', error);
+    });
   });
 
   await registration.update();

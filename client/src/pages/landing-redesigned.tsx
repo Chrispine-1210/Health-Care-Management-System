@@ -77,20 +77,14 @@ const roleHighlights = [
   ["Admins", "Monitor branches, users, audit logs, analytics, and service quality from one cockpit."],
 ];
 
-const fallbackProducts = [
-  { id: "fallback-paracetamol", name: "Paracetamol", category: "Pain relief", price: "2500", requiresPrescription: false },
-  { id: "fallback-amoxicillin", name: "Amoxicillin", category: "Prescription medicine", price: "8500", requiresPrescription: true },
-  { id: "fallback-ors", name: "Oral Rehydration Salts", category: "Family care", price: "1800", requiresPrescription: false },
-];
-
 export default function Landing() {
-  const { data: products, isLoading, isError } = useQuery<Product[]>({
+  const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
     staleTime: 5 * 60 * 1000,
     throwOnError: false,
   });
 
-  const featuredProducts = products && products.length > 0 ? products.slice(0, 3) : fallbackProducts;
+  const featuredProducts = products?.slice(0, 3) ?? [];
 
   return (
     <div className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.20),transparent_32rem),linear-gradient(135deg,hsl(var(--background)),hsl(var(--accent)/0.55))]">
