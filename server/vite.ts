@@ -73,14 +73,7 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 function acceptsHtml(req: express.Request) {
-  if (req.method !== "GET") {
-    return false;
-  }
-
-  const acceptsHtml = req.headers.accept?.includes("text/html") ?? false;
-  const isNavigation = req.headers["sec-fetch-mode"] === "navigate";
-
-  return req.path === "/" || acceptsHtml || isNavigation;
+  return req.method === "GET" && (req.accepts(["html", "json"]) === "html" || req.path === "/");
 }
 
 export function serveStatic(app: Express) {
