@@ -13,6 +13,11 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname, "client"),
   build: {
+    // Vercel builds with Vite/esbuild defaults that target older browsers and
+    // reject any preserved top-level await. The app and modern deployment
+    // stack are ESM-first, so target ES2022 to keep async startup/dependency
+    // output valid while still shipping broadly supported modern JavaScript.
+    target: "es2022",
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
