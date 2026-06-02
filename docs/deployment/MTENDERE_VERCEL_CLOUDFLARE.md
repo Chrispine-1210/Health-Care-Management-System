@@ -22,7 +22,6 @@ Set these variables before promoting a production deployment.
 | Variable | Production value |
 | --- | --- |
 | `VITE_API_BASE_URL` | `https://api.<your-domain>` or the HTTPS URL of the hosted Express backend |
-| `VITE_ENABLE_SERVICE_WORKER` | `false` by default; set to `true` only after offline/PWA cache QA passes |
 
 ### Backend API host
 
@@ -49,9 +48,7 @@ Set these variables before promoting a production deployment.
    - `/` returns the landing page.
    - `/login` returns the SPA page, not a Vercel `NOT_FOUND` page.
    - `/service-worker.js` returns JavaScript with `Cache-Control: no-cache, no-store, must-revalidate`.
-   - The browser console has no circular chunk/module startup errors and the root page is not controlled by an old service worker.
    - Browser network calls go to the configured `VITE_API_BASE_URL` host.
-   - If a previous deployment registered a service worker, the new app unregisters it while `VITE_ENABLE_SERVICE_WORKER=false` and clears `thandizo-*` caches.
 
 ## 4. Cloudflare custom domain setup
 
@@ -80,7 +77,6 @@ Apply these controls before go-live:
   - `/api/*prescription*`
 - Cache rule: bypass cache for `/api/*`.
 - Cache rule: cache static assets under `/assets/*` aggressively.
-- Cache rule: bypass cache for HTML document routes (`/`, `/login`, `/signup`, and other SPA paths) during rollout.
 - Bot Fight Mode or equivalent bot protection enabled.
 - Security level at least **Medium**.
 - HSTS enabled only after confirming HTTPS works for the root, `www`, and `api` hostnames.
@@ -103,7 +99,6 @@ Expected results:
 
 - TypeScript check passes.
 - Build produces `dist/public/index.html` and `dist/public/service-worker.js`.
-- Vite build output has no `Circular chunk` warning.
 - SPA routes return the app shell.
 - Asset misses do not return server bundle code.
 - API health and readiness endpoints return JSON.
