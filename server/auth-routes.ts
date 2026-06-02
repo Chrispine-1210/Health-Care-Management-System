@@ -15,10 +15,14 @@ const loginSchema = z.object({
 
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
-  role: z.enum(['admin', 'pharmacist', 'staff', 'customer', 'driver']),
+  password: z.string().min(12),
+  role: z.enum(['customer', 'driver']).default('customer'),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
+});
+
+const adminRegisterSchema = registerSchema.extend({
+  role: z.enum(['admin', 'pharmacist', 'staff', 'customer', 'driver']),
 });
 
 const refreshSchema = z.object({
@@ -56,7 +60,7 @@ export function registerAuthRoutes(app: Express) {
 
   /**
    * POST /api/auth/register
-   * Register new user
+   * Public self-registration is restricted to non-privileged roles.
    */
   app.post('/api/auth/register', async (req, res) => {
     try {
@@ -70,6 +74,24 @@ export function registerAuthRoutes(app: Express) {
       res.json({ success: true, message: result.message });
     } catch (error) {
       logger.error('Registration error', { error });
+      res.status(400).json({ success: false, message: String(error) });
+    }
+  });
+
+  /**
+   * POST /api/auth/admin/users
+   * Admin-only creation of privileged staff accounts.
+   */
+  app.post('/api/auth/admin/users', authenticateToken, requireRole('admin'), async (req, res) => {
+    try {
+      const { email, password, role, firstName, lastName } = adminRegisterSchema.parse(req.body);
+      const result = await authService.register(email, password, role, firstName, lastName);
+      if (!result.success) {
+        return res.status(400).json({ success: false, message: result.message });
+      }
+      res.json({ success: true, message: result.message });
+    } catch (error) {
+      logger.error('Admin registration error', { error });
       res.status(400).json({ success: false, message: String(error) });
     }
   });

@@ -1,0 +1,69 @@
+name: Thandizo Pharmacy Engineering Workstream
+about: Production stabilization issue for security, patient safety, inventory, notifications, performance, or operations.
+title: "[P0] Replace with clear, technical, actionable title"
+labels: [triage]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority tag
+      options:
+        - P0 - Critical / Immediate Risk
+        - P1 - High Impact
+        - P2 - Medium Priority / Optimization
+        - P3 - Enhancement / Future Scale
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: Describe the concrete operational, security, patient safety, data integrity, or performance gap.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact analysis
+      description: Cover patient impact, pharmacy impact, and system impact.
+    validations:
+      required: true
+  - type: textarea
+    id: technical_solution
+    attributes:
+      label: Technical solution proposal
+      description: Include backend, frontend, infra, data, and audit logging implications where applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Use measurable, testable criteria.
+    validations:
+      required: true
+  - type: input
+    id: dependencies
+    attributes:
+      label: Dependencies
+      placeholder: Related issues, providers, credentials, migrations, APIs, or infrastructure.
+    validations:
+      required: true
+  - type: dropdown
+    id: effort
+    attributes:
+      label: Estimated effort
+      options:
+        - S - 0.5-1 day
+        - M - 2-3 days
+        - L - 4-7 days
+        - XL - 2+ weeks
+    validations:
+      required: true
+  - type: input
+    id: labels
+    attributes:
+      label: Labels
+      placeholder: security, backend, frontend, infra, data, clinical, notifications
+    validations:
+      required: true

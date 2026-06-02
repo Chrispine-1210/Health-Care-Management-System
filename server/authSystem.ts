@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { logger } from './logger';
 import { z } from 'zod';
 
@@ -44,13 +44,14 @@ export interface SessionData {
 
 class PasswordManager {
   private algorithm = 'sha256';
+  private iterations = 120000;
 
   /**
    * Hash password with salt
    */
   hash(password: string, salt?: string): string {
-    const passwordSalt = salt || randomBytes(16).toString('hex');
-    const hash = createHmac(this.algorithm, passwordSalt).update(password).digest('hex');
+    const passwordSalt = salt || randomBytes(32).toString('hex');
+    const hash = createHmac(this.algorithm, passwordSalt).update(`${password}:${this.iterations}`).digest('hex');
     return `${hash}:${passwordSalt}`;
   }
 
@@ -59,8 +60,10 @@ class PasswordManager {
    */
   verify(password: string, hashedPassword: string): boolean {
     const [hash, salt] = hashedPassword.split(':');
-    const newHash = createHmac(this.algorithm, salt).update(password).digest('hex');
-    return newHash === hash;
+    const newHash = createHmac(this.algorithm, salt).update(`${password}:${this.iterations}`).digest('hex');
+    const expected = Buffer.from(hash, 'hex');
+    const actual = Buffer.from(newHash, 'hex');
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
   }
 }
 
@@ -74,7 +77,14 @@ class TokenManager {
   private refreshTokenExpiry = 7 * 24 * 60 * 60; // 7 days
 
   constructor(secret?: string) {
-    this.secret = secret || process.env.JWT_SECRET || 'default-secret-change-in-production';
+    this.secret = secret || process.env.JWT_SECRET || '';
+    if (!this.secret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('JWT_SECRET is required in production');
+      }
+      this.secret = randomBytes(32).toString('hex');
+      logger.warn('Ephemeral development JWT secret generated; set JWT_SECRET for persistent sessions');
+    }
   }
 
   /**
@@ -89,11 +99,11 @@ class TokenManager {
       exp: now + expiresIn,
     };
 
-    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64');
-    const encodedPayload = Buffer.from(JSON.stringify(tokenPayload)).toString('base64');
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(tokenPayload)).toString('base64url');
     const signature = createHmac('sha256', this.secret)
       .update(`${encodedHeader}.${encodedPayload}`)
-      .digest('base64');
+      .digest('base64url');
 
     return `${encodedHeader}.${encodedPayload}.${signature}`;
   }
@@ -108,11 +118,13 @@ class TokenManager {
 
       const signature = createHmac('sha256', this.secret)
         .update(`${parts[0]}.${parts[1]}`)
-        .digest('base64');
+        .digest('base64url');
 
-      if (signature !== parts[2]) return null;
+      const expected = Buffer.from(signature);
+      const actual = Buffer.from(parts[2]);
+      if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
 
-      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
       const now = Math.floor(Date.now() / 1000);
 
       if (payload.exp < now) return null;
@@ -155,7 +167,8 @@ class TokenManager {
 
 class SessionManager {
   private sessions: Map<string, SessionData> = new Map();
-  private refreshTokens: Map<string, string> = new Map(); // tokenId -> userId
+  private refreshTokens: Map<string, string> = new Map(); // refreshToken -> userId
+  private idleTimeoutMs = Number(process.env.SESSION_IDLE_TIMEOUT_MS || 30 * 60 * 1000);
   private blacklistedTokens: Set<string> = new Set();
 
   /**
@@ -203,7 +216,10 @@ class SessionManager {
     if (!session) return false;
 
     const now = Date.now();
-    if (session.expiresAt < now) {
+    if (session.expiresAt < now || now - session.lastActivity > this.idleTimeoutMs) {
+      this.blacklistedTokens.add(session.accessToken);
+      this.blacklistedTokens.add(session.refreshToken);
+      this.refreshTokens.delete(session.refreshToken);
       this.sessions.delete(userId);
       return false;
     }
@@ -363,8 +379,13 @@ export class AuthService {
       return null;
     }
 
+    if (this.sessionManager.isTokenBlacklisted(refreshToken)) {
+      logger.warn('Attempt to refresh with blacklisted token');
+      return null;
+    }
+
     const session = this.sessionManager.getSession(payload.sub);
-    if (!session) {
+    if (!session || session.refreshToken !== refreshToken || !this.sessionManager.isSessionActive(payload.sub)) {
       logger.warn('Refresh token session not found', { userId: payload.sub });
       return null;
     }
@@ -403,6 +424,11 @@ export class AuthService {
 
     const payload = this.tokenManager.verifyToken(token);
     if (!payload || payload.type !== 'access') {
+      return null;
+    }
+
+    if (!this.sessionManager.isSessionActive(payload.sub)) {
+      logger.warn('Inactive or expired session token rejected', { userId: payload.sub });
       return null;
     }
 
