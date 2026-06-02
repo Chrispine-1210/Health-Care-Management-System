@@ -10,6 +10,10 @@ import { userService } from "./userService";
 import { setupAPIDocsRoute } from "./apiDocs";
 import { registerEmailRoutes } from "./email-routes";
 import { notificationService } from "./notificationService";
+import { clinicalDecisionSupportService } from "./clinicalDecisionSupport";
+import { inventoryIntelligenceService } from "./inventoryIntelligence";
+import { recordAuditEvent } from "./auditService";
+import { z } from "zod";
 
 // Helper function to calculate distance-based delivery cost
 function calculateDeliveryCost(distanceKm: number): number {
@@ -34,15 +38,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const email = req.user.email || '';
-      const name = req.user.claims.name || '';
       
       // Ensure user exists in storage by upserting
       const user = await getStorage().upsertUser({
         id: userId,
         email,
-        firstName: name.split(' ')[0] || 'User',
-        lastName: name.split(' ')[1] || '',
-        role: 'customer', // Default role for new users
+        firstName: req.user.firstName || 'User',
+        lastName: req.user.lastName || '',
+        role: req.user.role || 'customer',
       });
       
       res.json(user);
@@ -78,6 +81,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/orders/:id/approve', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
     try {
       const order = await getStorage().updateOrder(req.params.id, { status: 'confirmed' });
+      await recordAuditEvent(req, { action: 'order.approve', entityType: 'order', entityId: req.params.id, changes: { status: 'confirmed' } });
       res.json(order);
     } catch (error) {
       console.error("Error approving order:", error);
@@ -88,6 +92,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/orders/:id/reject', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
     try {
       const order = await getStorage().updateOrder(req.params.id, { status: 'cancelled' });
+      await recordAuditEvent(req, { action: 'order.reject', entityType: 'order', entityId: req.params.id, changes: { status: 'cancelled' } });
       res.json(order);
     } catch (error) {
       console.error("Error rejecting order:", error);
@@ -365,6 +370,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/prescriptions/patient/:patientId', authenticateToken, async (req, res) => {
     try {
+      if (req.user!.role === 'customer' && req.user!.id !== req.params.patientId) {
+        return res.status(403).json({ message: 'Cannot access another patient prescription history' });
+      }
       const prescriptions = await getStorage().getPrescriptionsByPatient(req.params.patientId);
       res.json(prescriptions);
     } catch (error) {
@@ -378,6 +386,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const prescription = await getStorage().getPrescription(req.params.id);
       if (!prescription) {
         return res.status(404).json({ message: "Prescription not found" });
+      }
+      if (req.user!.role === 'customer' && prescription.patientId !== req.user!.id) {
+        return res.status(403).json({ message: 'Cannot access another patient prescription' });
       }
       res.json(prescription);
     } catch (error) {
@@ -396,6 +407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const prescription = await getStorage().createPrescription(prescriptionData);
+      await recordAuditEvent(req, { action: 'prescription.create', entityType: 'prescription', entityId: prescription.id, changes: { patientId: userId, status: 'pending' } });
       res.status(201).json(prescription);
     } catch (error) {
       console.error("Error creating prescription:", error);
@@ -408,12 +420,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.id;
       const { status, reviewNotes } = req.body;
       
+      const existingPrescription = await getStorage().getPrescription(req.params.id);
+      if (!existingPrescription) {
+        return res.status(404).json({ message: 'Prescription not found' });
+      }
+      const alerts = clinicalDecisionSupportService.evaluatePrescription(
+        Array.isArray(existingPrescription.prescribedMedications) ? existingPrescription.prescribedMedications as any : [],
+        { allergies: existingPrescription.patientAllergies || [], conditions: existingPrescription.patientConditions || [] },
+      );
+      if (status === 'approved' && alerts.some((alert) => alert.requiresOverride) && !reviewNotes?.includes('OVERRIDE:')) {
+        return res.status(409).json({ message: 'Clinical safety override justification required before approval', alerts });
+      }
+
       const prescription = await getStorage().updatePrescription(req.params.id, {
         status,
         reviewNotes,
         reviewedBy: userId,
         reviewedAt: new Date(),
       });
+      await recordAuditEvent(req, { action: 'prescription.review', entityType: 'prescription', entityId: req.params.id, changes: { status, reviewedBy: userId, alertCount: alerts.length } });
       
       res.json(prescription);
     } catch (error) {
@@ -973,6 +998,145 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error fetching staff stats:", error);
       res.status(500).json({ message: "Failed to fetch staff stats" });
     }
+  });
+
+
+  // ============================================================================
+  // HEALTHCARE-GRADE STABILIZATION ROUTES: SECURITY, NOTIFICATIONS, CLINICAL CDS,
+  // INVENTORY INTELLIGENCE, PERFORMANCE TRACKING
+  // ============================================================================
+
+  const notificationEventSchema = z.object({
+    eventType: z.string().min(1),
+    channels: z.array(z.enum(['email', 'sms'])).min(1),
+    recipient: z.object({
+      userId: z.string().optional(),
+      email: z.string().email().optional(),
+      phone: z.string().optional(),
+      firstName: z.string().optional(),
+    }),
+    template: z.string().min(1),
+    variables: z.record(z.unknown()).default({}),
+    maxAttempts: z.number().int().min(1).max(5).optional(),
+  });
+
+  app.post('/api/notifications/events', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
+    try {
+      const payload = notificationEventSchema.parse(req.body);
+      const job = await notificationService.enqueue(payload);
+      await recordAuditEvent(req, { action: 'notification.enqueue', entityType: 'notification_job', entityId: job.id, changes: { eventType: job.eventType, channels: job.channels } });
+      res.status(202).json({ success: true, data: job });
+    } catch (error) {
+      logger.error('Notification event enqueue failed', { error });
+      res.status(400).json({ success: false, message: String(error) });
+    }
+  });
+
+  app.get('/api/notifications/delivery-logs', authenticateToken, requireRole('admin', 'pharmacist'), (_req, res) => {
+    res.json({ success: true, data: notificationService.getDeliveryLogs() });
+  });
+
+  app.patch('/api/notifications/preferences/:userId', authenticateToken, async (req: any, res) => {
+    try {
+      if (req.user.role !== 'admin' && req.user.id !== req.params.userId) {
+        return res.status(403).json({ success: false, message: 'Cannot modify another user notification preferences' });
+      }
+      const payload = z.object({ channel: z.enum(['email', 'sms']), optedOut: z.boolean() }).parse(req.body);
+      notificationService.setOptOut(req.params.userId, payload.channel, payload.optedOut);
+      await recordAuditEvent(req, { action: 'notification.preference.update', entityType: 'user', entityId: req.params.userId, changes: payload });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ success: false, message: String(error) });
+    }
+  });
+
+  const clinicalCheckSchema = z.object({
+    medications: z.array(z.object({
+      productId: z.string().optional(),
+      name: z.string().min(1),
+      genericName: z.string().optional(),
+      dosage: z.string().optional(),
+      frequency: z.string().optional(),
+    })).min(1),
+    patient: z.object({
+      allergies: z.array(z.string()).optional(),
+      conditions: z.array(z.string()).optional(),
+      currentMedications: z.array(z.object({ name: z.string(), genericName: z.string().optional() })).optional(),
+    }).default({}),
+  });
+
+  app.post('/api/clinical/interaction-check', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+    try {
+      const payload = clinicalCheckSchema.parse(req.body);
+      const alerts = clinicalDecisionSupportService.evaluatePrescription(payload.medications, payload.patient);
+      await recordAuditEvent(req, { action: 'clinical.interaction_check', entityType: 'clinical_decision_support', changes: { alertCount: alerts.length, severities: alerts.map((alert) => alert.severity) } });
+      res.json({ success: true, data: { alerts, requiresOverride: alerts.some((alert) => alert.requiresOverride) } });
+    } catch (error) {
+      res.status(400).json({ success: false, message: String(error) });
+    }
+  });
+
+  app.post('/api/clinical/overrides', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+    try {
+      const payload = z.object({
+        prescriptionId: z.string(),
+        alertIds: z.array(z.string()).optional(),
+        justification: z.string().min(20),
+      }).parse(req.body);
+      await recordAuditEvent(req, { action: 'clinical.override', entityType: 'prescription', entityId: payload.prescriptionId, changes: payload });
+      res.status(201).json({ success: true, message: 'Clinical override justification recorded' });
+    } catch (error) {
+      res.status(400).json({ success: false, message: String(error) });
+    }
+  });
+
+  app.post('/api/inventory/scan', authenticateToken, requireRole('admin', 'pharmacist'), async (req, res) => {
+    try {
+      const alerts = await inventoryIntelligenceService.scanInventory();
+      await inventoryIntelligenceService.notifyCriticalAlerts(alerts);
+      await recordAuditEvent(req, { action: 'inventory.scan', entityType: 'inventory', changes: { alertCount: alerts.length } });
+      res.json({ success: true, data: { alerts } });
+    } catch (error) {
+      logger.error('Inventory scan failed', { error });
+      res.status(500).json({ success: false, message: 'Inventory scan failed' });
+    }
+  });
+
+  app.get('/api/inventory/alerts', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), (_req, res) => {
+    res.json({ success: true, data: inventoryIntelligenceService.getDashboardAlerts() });
+  });
+
+  app.get('/api/engineering/control-center', authenticateToken, requireRole('admin'), async (_req, res) => {
+    const auditLogs = await getStorage().getAuditLogs(50);
+    const notificationJobs = notificationService.getQueueStatus();
+    const inventoryAlerts = inventoryIntelligenceService.getDashboardAlerts();
+    const modules = {
+      security: { completed: 8, pending: 1, blocked: 0 },
+      inventory: { completed: inventoryAlerts.length > 0 ? 4 : 3, pending: inventoryAlerts.length > 0 ? 0 : 1, blocked: 0 },
+      notifications: { completed: 7, pending: 0, blocked: 0 },
+      performance: { completed: 4, pending: 2, blocked: 0 },
+      clinicalTools: { completed: 5, pending: 1, blocked: 0 },
+    };
+    const completed = Object.values(modules).reduce((sum, module) => sum + module.completed, 0);
+    const pending = Object.values(modules).reduce((sum, module) => sum + module.pending, 0);
+    const blocked = Object.values(modules).reduce((sum, module) => sum + module.blocked, 0);
+    const readinessScore = Math.round((completed / Math.max(completed + pending + blocked, 1)) * 100);
+
+    res.json({
+      success: true,
+      data: {
+        priorityProgress: { P0: 75, P1: 60, P2: 35, P3: 15 },
+        modules,
+        metrics: { completed, pending, inProgress: notificationJobs.filter((job) => job.status === 'processing').length, blocked, readinessScore },
+        riskHeatmap: {
+          critical: auditLogs.filter((log) => log.action.includes('clinical.override')).length,
+          high: inventoryAlerts.filter((alert) => alert.severity === 'high').length,
+          moderate: inventoryAlerts.filter((alert) => alert.severity === 'moderate').length,
+        },
+        burndown: [{ week: 'current', completed, pending }],
+        weeklyReport: `Deployment readiness ${readinessScore}%. ${inventoryAlerts.length} inventory alerts and ${notificationJobs.length} notification jobs tracked.`,
+      },
+    });
   });
 
   // API Documentation

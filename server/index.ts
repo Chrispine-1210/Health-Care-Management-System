@@ -4,9 +4,13 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
-import { getStorage } from "./storageManager";
+import { securityHeaders, sanitizeRequest, rateLimit } from "./security";
+import { inventoryIntelligenceService } from "./inventoryIntelligence";
 
 const app = express();
+app.disable("x-powered-by");
+app.use(securityHeaders);
+app.use(rateLimit());
 
 declare module "http" {
   interface IncomingMessage {
@@ -25,6 +29,7 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: false }));
+app.use(sanitizeRequest);
 
 // ──────────────────────────────
 // REQUEST LOGGING
@@ -65,8 +70,9 @@ app.use((req, res, next) => {
   // Setup authentication & sessions
   await setupAuth(app);
 
-  // Register routes
-  const server = await registerRoutes(app, { isAuthenticated, requireRole });
+  // Start inventory automation and register routes
+  inventoryIntelligenceService.startDailyScheduler();
+  const server = await registerRoutes(app);
 
   // GLOBAL ERROR HANDLER
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
