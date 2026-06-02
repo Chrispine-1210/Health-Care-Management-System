@@ -2,303 +2,342 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Truck, Users, Package, Shield, Zap, Pill, Heart, TrendingUp, MapPin } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  Cloud,
+  HeartPulse,
+  LockKeyhole,
+  MapPin,
+  Package,
+  Pill,
+  ShieldCheck,
+  Smartphone,
+  Stethoscope,
+  Truck,
+  Users,
+  Zap,
+} from "lucide-react";
 import { Link } from "wouter";
 import type { Product } from "@shared/schema";
 
+const assuranceItems = [
+  "PMRA-aware pharmacy workflows",
+  "Encrypted sessions and hardened headers",
+  "Live readiness checks for production uptime",
+  "Cloudflare + Vercel deployment checklist",
+];
+
+const capabilities = [
+  {
+    icon: Pill,
+    title: "Clinical pharmacy operations",
+    description:
+      "Prescription intake, pharmacist review queues, stock batches, expiry monitoring, and medicine catalog control in one secure workspace.",
+  },
+  {
+    icon: Truck,
+    title: "Delivery command centre",
+    description:
+      "Route visibility, driver assignment, customer tracking, proof-of-delivery support, and distance-aware delivery pricing.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Security-first access",
+    description:
+      "Role-based dashboards for administrators, pharmacists, staff, drivers, and customers with audit-friendly operational separation.",
+  },
+  {
+    icon: Activity,
+    title: "Quality of service",
+    description:
+      "Health probes, production headers, caching safeguards, and low-bandwidth friendly PWA behavior for reliable healthcare access.",
+  },
+  {
+    icon: Cloud,
+    title: "Cloud deployment ready",
+    description:
+      "Vercel static delivery, external API base URL support, Cloudflare DNS guidance, HTTPS, and edge security recommendations.",
+  },
+  {
+    icon: Smartphone,
+    title: "Mobile-first experience",
+    description:
+      "Responsive patient shopping, prescription upload, order updates, and branch workflows optimized for phones and tablets.",
+  },
+];
+
+const roleHighlights = [
+  ["Customers", "Order medicines, upload prescriptions, track delivery, and manage personal healthcare access."],
+  ["Pharmacists", "Review prescriptions, validate stock, detect clinical risks, and approve fulfilment."],
+  ["Staff", "Run POS, prepare orders, coordinate pickups, and keep branch operations moving."],
+  ["Drivers", "Receive assignments, update delivery status, and maintain accountable last-mile service."],
+  ["Admins", "Monitor branches, users, audit logs, analytics, and service quality from one cockpit."],
+];
+
 export default function Landing() {
-  const { data: products } = useQuery<Product[]>({
+  const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
     staleTime: 5 * 60 * 1000,
   });
 
+  const featuredProducts = products?.slice(0, 3) ?? [];
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-primary/5">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
-        <nav className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Heart className="h-6 w-6 text-chart-2" />
-            <div className="text-2xl font-bold text-primary">Thandizo Pharmacy</div>
+    <div className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.20),transparent_32rem),linear-gradient(135deg,hsl(var(--background)),hsl(var(--accent)/0.55))]">
+      <header className="sticky top-0 z-50 border-b bg-background/85 shadow-sm backdrop-blur-xl">
+        <nav className="container mx-auto flex items-center justify-between px-4 py-4">
+          <Link href="/" className="flex items-center gap-3" data-testid="link-brand-home">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+              <HeartPulse className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="text-lg font-black leading-none tracking-tight text-primary sm:text-2xl">
+                Thandizo Healthcare
+              </div>
+              <p className="hidden text-xs font-medium text-muted-foreground sm:block">
+                Mtendere-ready pharmacy cloud platform
+              </p>
+            </div>
+          </Link>
+
+          <div className="hidden items-center gap-6 text-sm font-medium text-muted-foreground md:flex">
+            <a href="#platform" className="transition hover:text-primary">Platform</a>
+            <a href="#quality" className="transition hover:text-primary">Security</a>
+            <a href="#cloud" className="transition hover:text-primary">Cloud</a>
           </div>
+
           <Link href="/sign-in">
-            <Button variant="outline" data-testid="button-signin-nav">
-              Sign In
+            <Button className="gap-2" data-testid="button-signin-nav">
+              Sign In <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
         </nav>
       </header>
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 py-20">
-        <div className="max-w-4xl mx-auto text-center mb-20">
-          <Badge className="mb-6 bg-chart-2/20 text-chart-2 hover:bg-chart-2/30">
-            Malawi's Leading Pharmacy Management System
-          </Badge>
-          <h1 className="text-6xl font-bold mb-6 leading-tight">
-            Healthcare Made <span className="text-chart-2">Simple & Accessible</span>
-          </h1>
-          <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Thandizo Pharmacy brings complete healthcare management to Malawi with medicine delivery, 
-            live tracking, and multi-role system for seamless pharmacy operations across all branches.
-          </p>
-          <div className="flex gap-4 justify-center">
-            <Link href="/sign-in">
-              <Button size="lg" className="gap-2" data-testid="button-get-started">
-                Get Started Now
-              </Button>
-            </Link>
-            <Button size="lg" variant="outline">
-              Learn More
-            </Button>
+      <main>
+        <section className="container mx-auto grid items-center gap-12 px-4 py-16 lg:grid-cols-[1.05fr_0.95fr] lg:py-24">
+          <div>
+            <Badge className="mb-6 border-primary/20 bg-primary/10 px-4 py-2 text-primary hover:bg-primary/15">
+              Production-ready healthcare operations for Malawi
+            </Badge>
+            <h1 className="max-w-4xl text-5xl font-black tracking-tight text-foreground sm:text-6xl lg:text-7xl">
+              Secure pharmacy care, delivery, and operations — elevated for Mtendere.
+            </h1>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground sm:text-xl">
+              Thandizo Healthcare unifies prescription review, medicine ordering, branch inventory,
+              driver tracking, and executive oversight with the security and deployment discipline needed
+              for a serious production rollout.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link href="/sign-in">
+                <Button size="lg" className="gap-2 px-8" data-testid="button-get-started">
+                  Launch secure demo <ArrowRight className="h-5 w-5" />
+                </Button>
+              </Link>
+              <a href="#cloud">
+                <Button size="lg" variant="outline" className="w-full gap-2 px-8 sm:w-auto">
+                  View production plan <Cloud className="h-5 w-5" />
+                </Button>
+              </a>
+            </div>
+            <div className="mt-8 grid gap-3 sm:grid-cols-2">
+              {assuranceItems.map((item) => (
+                <div key={item} className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-primary" />
+                  {item}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
 
-      {/* Medicine Showcase */}
-      <section className="container mx-auto px-4 py-20">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-bold mb-4">Available Medicines</h2>
-          <p className="text-lg text-muted-foreground">Order from our comprehensive catalog of medications</p>
-        </div>
-        <div className="grid md:grid-cols-3 gap-6 mb-12">
-          {products && products.length > 0 ? (
-            products.slice(0, 6).map((product) => (
-              <Card key={product.id} className="hover:shadow-lg transition-shadow" data-testid={`card-product-${product.id}`}>
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="font-bold text-lg">{product.name}</h3>
-                      <p className="text-sm text-muted-foreground">{product.category}</p>
-                    </div>
-                    {product.requiresPrescription && (
-                      <Badge variant="outline" className="ml-2">Rx</Badge>
-                    )}
+          <Card className="relative border-primary/10 bg-background/90 shadow-2xl shadow-primary/10 backdrop-blur">
+            <CardContent className="p-6 sm:p-8">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">Executive cockpit</p>
+                  <h2 className="mt-2 text-2xl font-black">Live service posture</h2>
+                </div>
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 dark:bg-green-950 dark:text-green-300">
+                  Online
+                </Badge>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border bg-card p-4">
+                  <Clock3 className="mb-3 h-6 w-6 text-primary" />
+                  <p className="text-3xl font-black">99.9%</p>
+                  <p className="text-sm text-muted-foreground">Target uptime posture</p>
+                </div>
+                <div className="rounded-2xl border bg-card p-4">
+                  <LockKeyhole className="mb-3 h-6 w-6 text-primary" />
+                  <p className="text-3xl font-black">TLS</p>
+                  <p className="text-sm text-muted-foreground">Cloudflare protected domain</p>
+                </div>
+                <div className="rounded-2xl border bg-card p-4">
+                  <Users className="mb-3 h-6 w-6 text-primary" />
+                  <p className="text-3xl font-black">5</p>
+                  <p className="text-sm text-muted-foreground">Role-based workspaces</p>
+                </div>
+                <div className="rounded-2xl border bg-card p-4">
+                  <MapPin className="mb-3 h-6 w-6 text-primary" />
+                  <p className="text-3xl font-black">MW</p>
+                  <p className="text-sm text-muted-foreground">Built for Malawi operations</p>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl bg-primary p-5 text-primary-foreground">
+                <div className="flex items-center gap-3">
+                  <Zap className="h-6 w-6" />
+                  <div>
+                    <p className="font-bold">Production fixes included</p>
+                    <p className="text-sm opacity-90">API base URL support, health probes, secure headers, and Vercel edge routing.</p>
                   </div>
-                  <div className="flex items-baseline gap-2 mb-4">
-                    <span className="text-2xl font-bold text-chart-2">MK {product.price}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section id="platform" className="container mx-auto px-4 py-16">
+          <div className="mx-auto mb-12 max-w-3xl text-center">
+            <Badge variant="outline" className="mb-4">Platform</Badge>
+            <h2 className="text-4xl font-black tracking-tight sm:text-5xl">A healthcare system that looks premium and works hard.</h2>
+            <p className="mt-4 text-lg text-muted-foreground">
+              Every screen supports a real operational journey: patient access, pharmacist safety, stock control, fulfilment, delivery, and management oversight.
+            </p>
+          </div>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {capabilities.map(({ icon: Icon, title, description }) => (
+              <Card key={title} className="group border-primary/10 bg-background/80 transition hover:-translate-y-1 hover:shadow-xl hover:shadow-primary/10" data-testid={`card-capability-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                <CardContent className="p-6">
+                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition group-hover:bg-primary group-hover:text-primary-foreground">
+                    <Icon className="h-6 w-6" />
                   </div>
-                  <Button className="w-full" size="sm" data-testid={`button-add-cart-${product.id}`}>
-                    Add to Cart
-                  </Button>
+                  <h3 className="text-xl font-black">{title}</h3>
+                  <p className="mt-3 leading-7 text-muted-foreground">{description}</p>
                 </CardContent>
               </Card>
-            ))
-          ) : (
-            <Card className="col-span-3">
-              <CardContent className="pt-6 text-center">
-                <Pill className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                <p className="text-muted-foreground">Loading medicines...</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-        <div className="text-center">
-          <Link href="/sign-in">
-            <Button size="lg" variant="outline" data-testid="button-browse-all">
-              Browse Full Catalog
-            </Button>
-          </Link>
-        </div>
-      </section>
-
-      {/* Key Features */}
-      <section className="bg-muted/50 py-20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold mb-4">Complete Healthcare Solution</h2>
-            <p className="text-lg text-muted-foreground">Everything you need for modern pharmacy operations</p>
+            ))}
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <Card data-testid="card-feature-delivery">
-              <CardContent className="pt-6">
-                <Truck className="h-8 w-8 text-chart-2 mb-4" />
-                <h3 className="font-bold mb-2">Live Delivery Tracking</h3>
-                <p className="text-sm text-muted-foreground">Real-time GPS tracking, customer location pinning, and distance-based pricing (500 MK + 50 MK/km)</p>
+        </section>
+
+        <section className="bg-background/70 py-16" id="quality">
+          <div className="container mx-auto grid gap-10 px-4 lg:grid-cols-[0.8fr_1.2fr]">
+            <div>
+              <Badge variant="outline" className="mb-4">Security & QoS</Badge>
+              <h2 className="text-4xl font-black tracking-tight">Built for safe healthcare delivery, not just a demo.</h2>
+              <p className="mt-4 text-lg leading-8 text-muted-foreground">
+                The production posture now prioritizes browser security, predictable caching, custom-domain HTTPS, API separation, and operational probes.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {[
+                "Strict transport security and hardened content policies",
+                "No accidental server bundle exposure through SPA fallbacks",
+                "Network-first API behavior for live healthcare data",
+                "Cloudflare DNS, SSL, firewall, and cache recommendations documented",
+              ].map((item) => (
+                <div key={item} className="rounded-2xl border bg-card p-5 shadow-sm">
+                  <CheckCircle2 className="mb-4 h-6 w-6 text-primary" />
+                  <p className="font-semibold leading-7">{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="container mx-auto px-4 py-16">
+          <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
+            <Card className="border-primary/10 bg-primary text-primary-foreground shadow-2xl shadow-primary/20" id="cloud">
+              <CardContent className="p-8 sm:p-10">
+                <Badge className="mb-5 bg-white/15 text-white hover:bg-white/20">Vercel + Cloudflare</Badge>
+                <h2 className="text-4xl font-black tracking-tight">Custom-domain deployment path for Mtendere Healthcare.</h2>
+                <p className="mt-4 max-w-2xl text-lg leading-8 opacity-90">
+                  Deploy the static web app on Vercel, point Cloudflare DNS to Vercel, set
+                  <code className="mx-1 rounded bg-white/15 px-1.5 py-0.5">VITE_API_BASE_URL</code>
+                  to the secure API host, and use Cloudflare for TLS, WAF rules, and uptime controls.
+                </p>
+                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                  <Link href="/sign-in">
+                    <Button size="lg" variant="secondary" className="gap-2" data-testid="button-signin-cloud">
+                      Enter system <ArrowRight className="h-5 w-5" />
+                    </Button>
+                  </Link>
+                  <a href="/manifest.json">
+                    <Button size="lg" variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white">
+                      PWA manifest
+                    </Button>
+                  </a>
+                </div>
               </CardContent>
             </Card>
 
-            <Card data-testid="card-feature-inventory">
-              <CardContent className="pt-6">
-                <Package className="h-8 w-8 text-chart-2 mb-4" />
-                <h3 className="font-bold mb-2">Smart Inventory</h3>
-                <p className="text-sm text-muted-foreground">Track stock levels, expiry dates, batch numbers, and automatic low-stock alerts</p>
-              </CardContent>
-            </Card>
-
-            <Card data-testid="card-feature-prescriptions">
-              <CardContent className="pt-6">
-                <Pill className="h-8 w-8 text-chart-2 mb-4" />
-                <h3 className="font-bold mb-2">Prescription Management</h3>
-                <p className="text-sm text-muted-foreground">Digital prescription uploads, pharmacist review queue, drug interaction checking</p>
-              </CardContent>
-            </Card>
-
-            <Card data-testid="card-feature-roles">
-              <CardContent className="pt-6">
-                <Users className="h-8 w-8 text-chart-2 mb-4" />
-                <h3 className="font-bold mb-2">Multi-Role System</h3>
-                <p className="text-sm text-muted-foreground">Customer, Driver, Pharmacist, Staff, and Admin with specialized dashboards</p>
-              </CardContent>
-            </Card>
-
-            <Card data-testid="card-feature-security">
-              <CardContent className="pt-6">
-                <Shield className="h-8 w-8 text-chart-2 mb-4" />
-                <h3 className="font-bold mb-2">Secure & Compliant</h3>
-                <p className="text-sm text-muted-foreground">PMRA regulated, audit logs, account verification via National ID/face scan/OTP</p>
-              </CardContent>
-            </Card>
-
-            <Card data-testid="card-feature-analytics">
-              <CardContent className="pt-6">
-                <TrendingUp className="h-8 w-8 text-chart-2 mb-4" />
-                <h3 className="font-bold mb-2">Performance Tracking</h3>
-                <p className="text-sm text-muted-foreground">Merit badges, driver/pharmacist analytics, sales dashboards, performance metrics</p>
+            <Card className="bg-background/90">
+              <CardContent className="p-6 sm:p-8">
+                <h3 className="text-2xl font-black">Role coverage</h3>
+                <div className="mt-6 space-y-4">
+                  {roleHighlights.map(([role, description]) => (
+                    <div key={role} className="rounded-2xl border bg-card p-4">
+                      <p className="font-black text-primary">{role}</p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Role Showcase */}
-      <section className="container mx-auto px-4 py-20">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-bold mb-4">Built for Every Role</h2>
-          <p className="text-lg text-muted-foreground">Specialized dashboards and tools for each user type</p>
-        </div>
-        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-          <Card data-testid="card-role-customer">
-            <CardContent className="pt-6">
-              <div className="mb-4 p-3 bg-purple-100 dark:bg-purple-900 rounded-lg w-fit">
-                <Users className="h-6 w-6 text-purple-600 dark:text-purple-300" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Customers</h3>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>✓ Browse medicine catalog</li>
-                <li>✓ Place orders online</li>
-                <li>✓ Track deliveries live</li>
-                <li>✓ Upload prescriptions</li>
-                <li>✓ Book consultations</li>
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-role-driver">
-            <CardContent className="pt-6">
-              <div className="mb-4 p-3 bg-blue-100 dark:bg-blue-900 rounded-lg w-fit">
-                <Truck className="h-6 w-6 text-blue-600 dark:text-blue-300" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Drivers</h3>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>✓ View assigned deliveries</li>
-                <li>✓ Live GPS tracking</li>
-                <li>✓ Proof of delivery uploads</li>
-                <li>✓ Customer communication</li>
-                <li>✓ Earn merit badges</li>
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-role-pharmacist">
-            <CardContent className="pt-6">
-              <div className="mb-4 p-3 bg-green-100 dark:bg-green-900 rounded-lg w-fit">
-                <Pill className="h-6 w-6 text-green-600 dark:text-green-300" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Pharmacists</h3>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>✓ Review prescription queue</li>
-                <li>✓ Manage inventory & stock</li>
-                <li>✓ Check drug interactions</li>
-                <li>✓ View sales dashboards</li>
-                <li>✓ Manage delivery fleet</li>
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-role-staff">
-            <CardContent className="pt-6">
-              <div className="mb-4 p-3 bg-orange-100 dark:bg-orange-900 rounded-lg w-fit">
-                <Users className="h-6 w-6 text-orange-600 dark:text-orange-300" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Staff</h3>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>✓ In-store POS terminal</li>
-                <li>✓ Order approvals</li>
-                <li>✓ Sales statistics</li>
-                <li>✓ Inventory quick view</li>
-                <li>✓ Daily performance reports</li>
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-role-admin">
-            <CardContent className="pt-6">
-              <div className="mb-4 p-3 bg-red-100 dark:bg-red-900 rounded-lg w-fit">
-                <Shield className="h-6 w-6 text-red-600 dark:text-red-300" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Admin</h3>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>✓ Full system overview</li>
-                <li>✓ User management</li>
-                <li>✓ Branch management</li>
-                <li>✓ Comprehensive analytics</li>
-                <li>✓ Audit logs & reports</li>
-              </ul>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      {/* Stats Section */}
-      <section className="bg-primary/5 py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8 text-center">
-            <div data-testid="stat-medicines">
-              <div className="text-3xl font-bold text-chart-2 mb-2">500+</div>
-              <p className="text-muted-foreground">Medicines Available</p>
+        <section className="container mx-auto px-4 pb-20">
+          <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div>
+              <Badge variant="outline" className="mb-3">Medicine access</Badge>
+              <h2 className="text-3xl font-black tracking-tight sm:text-4xl">Featured medicine catalog</h2>
+              <p className="mt-2 text-muted-foreground">Live sample products load from the production API when available.</p>
             </div>
-            <div data-testid="stat-branches">
-              <div className="text-3xl font-bold text-chart-2 mb-2">5</div>
-              <p className="text-muted-foreground">Pharmacy Branches</p>
-            </div>
-            <div data-testid="stat-users">
-              <div className="text-3xl font-bold text-chart-2 mb-2">5 Roles</div>
-              <p className="text-muted-foreground">Multi-Role System</p>
-            </div>
-            <div data-testid="stat-coverage">
-              <div className="text-3xl font-bold text-chart-2 mb-2">Malawi</div>
-              <p className="text-muted-foreground">Wide Coverage</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="container mx-auto px-4 py-20">
-        <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-6">Ready to Transform Your Pharmacy?</h2>
-          <p className="text-xl text-muted-foreground mb-8">
-            Join Thandizo Pharmacy and experience seamless healthcare management with real-time tracking, 
-            comprehensive inventory control, and multi-role collaboration.
-          </p>
-          <div className="flex gap-4 justify-center flex-wrap">
             <Link href="/sign-in">
-              <Button size="lg" data-testid="button-signin-cta">
-                Test Demo Now
-              </Button>
+              <Button variant="outline" data-testid="button-browse-all">Browse full catalog</Button>
             </Link>
-            <Button size="lg" variant="outline">
-              Contact Sales
-            </Button>
           </div>
-        </div>
-      </section>
+          <div className="grid gap-6 md:grid-cols-3">
+            {featuredProducts.length > 0 ? (
+              featuredProducts.map((product) => (
+                <Card key={product.id} className="bg-background/90" data-testid={`card-product-${product.id}`}>
+                  <CardContent className="p-6">
+                    <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <Package className="h-6 w-6" />
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-lg font-black">{product.name}</h3>
+                        <p className="text-sm text-muted-foreground">{product.category}</p>
+                      </div>
+                      {product.requiresPrescription && <Badge variant="outline">Rx</Badge>}
+                    </div>
+                    <p className="mt-5 text-2xl font-black text-primary">MK {product.price}</p>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card className="md:col-span-3">
+                <CardContent className="p-8 text-center">
+                  <Stethoscope className="mx-auto mb-3 h-10 w-10 text-primary" />
+                  <p className="font-semibold">{isLoading ? "Loading live medicines..." : "Medicine catalog is ready once the API is connected."}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Set VITE_API_BASE_URL in Vercel for the deployed frontend to reach the backend API.</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </section>
+      </main>
 
-      {/* Footer */}
-      <footer className="border-t bg-muted/50">
-        <div className="container mx-auto px-4 py-8 text-center text-muted-foreground">
-          <p>© 2024 Thandizo Pharmacy. Malawi's Leading Healthcare Management System.</p>
+      <footer className="border-t bg-background/90">
+        <div className="container mx-auto flex flex-col gap-3 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <p>© 2026 Thandizo Healthcare. Built for secure Mtendere Healthcare operations.</p>
+          <p>HTTPS • PWA • Role-based healthcare workflows • Cloudflare-ready</p>
         </div>
       </footer>
     </div>

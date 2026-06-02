@@ -14,6 +14,7 @@ import { clinicalDecisionSupportService } from "./clinicalDecisionSupport";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
 import { recordAuditEvent } from "./auditService";
 import { z } from "zod";
+import { healthCheck, readinessCheck } from "./healthCheck";
 
 // Helper function to calculate distance-based delivery cost
 function calculateDeliveryCost(distanceKm: number): number {
@@ -24,6 +25,11 @@ function calculateDeliveryCost(distanceKm: number): number {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  app.get('/health', healthCheck);
+  app.get('/ready', readinessCheck);
+  app.get('/api/health', healthCheck);
+  app.get('/api/ready', readinessCheck);
+
   // Register new production auth routes
   registerAuthRoutes(app);
 
