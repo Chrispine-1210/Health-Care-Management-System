@@ -2,13 +2,24 @@
 
 declare const self: ServiceWorkerGlobalScope;
 
-const CACHE_NAME = 'thandizo-v3';
-const CACHE_PREFIX = 'thandizo-';
+const CACHE_NAME = 'thandizo-v2';
+const APP_SHELL_URL = '/index.html';
+const PRECACHE_URLS = [APP_SHELL_URL, '/manifest.json'];
 const STATIC_DESTINATIONS = new Set(['script', 'style', 'image', 'font', 'manifest']);
-const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Thandizo Healthcare Offline</title><style>body{font-family:system-ui,sans-serif;margin:0;display:grid;min-height:100vh;place-items:center;background:#f8fafc;color:#0f172a}.card{max-width:34rem;margin:1rem;padding:2rem;border-radius:1.5rem;background:white;box-shadow:0 20px 50px rgba(15,23,42,.12)}h1{margin:0 0 .75rem;color:#15803d}</style></head><body><main class="card"><h1>Thandizo Healthcare is offline</h1><p>Please reconnect to the internet and refresh. We avoid serving stale healthcare screens so you always see current clinical and order information.</p></main></body></html>`;
 
+// Install event - cache only the app shell and stable public metadata. Avoid
+// caching '/' so a bad navigation response cannot become the permanent startup
+// page for the app.
 self.addEventListener('install', (event: ExtendableEvent) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(PRECACHE_URLS).catch(() => {
+        // Gracefully handle failures
+        console.log('Some assets failed to cache');
+      });
+    })
+  );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {
@@ -25,30 +36,34 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 
 function shouldCacheResponse(response: Response) {
   const contentType = response.headers.get('content-type') || '';
+
   return response.ok && !contentType.includes('text/html');
 }
 
-async function networkOnlyNavigation(request: Request) {
-  try {
-    return await fetch(request, { cache: 'no-store' });
-  } catch {
-    return new Response(OFFLINE_HTML, {
-      status: 503,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
-  }
-}
-
-async function networkFirst(request: Request) {
-  try {
-    const response = await fetch(request);
+function networkFirst(request: Request, fallbackUrl?: string) {
+  return fetch(request).then((response) => {
     if (shouldCacheResponse(response)) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
+      const responseClone = response.clone();
+      caches.open(CACHE_NAME).then((cache) => {
+        cache.put(request, responseClone);
+      });
     }
     return response;
-  } catch {
-    return (await caches.match(request)) || new Response('Offline - cached data unavailable', { status: 503 });
+  }).catch(() => {
+    return caches.match(request).then((cached) => {
+      if (cached) return cached;
+      if (fallbackUrl) return caches.match(fallbackUrl);
+      return undefined;
+    }).then((cached) => {
+      return cached || new Response('Offline - cached data unavailable', { status: 503 });
+    });
+  });
+}
+
+// Fetch event - network first for navigations/API, cache first for immutable assets
+self.addEventListener('fetch', (event: FetchEvent) => {
+  if (event.request.method !== 'GET') {
+    return;
   }
 }
 
@@ -72,11 +87,12 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(event.request).then((response) => {
+      return cached || fetch(event.request).then((response) => {
         if (shouldCacheResponse(response)) {
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
         }
         return response;
       });

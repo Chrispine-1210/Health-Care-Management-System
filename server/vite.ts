@@ -73,14 +73,7 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 function acceptsHtml(req: express.Request) {
-  if (req.method !== "GET") {
-    return false;
-  }
-
-  const acceptsHtml = req.headers.accept?.includes("text/html") ?? false;
-  const isNavigation = req.headers["sec-fetch-mode"] === "navigate";
-
-  return req.path === "/" || acceptsHtml || isNavigation;
+  return req.method === "GET" && (req.accepts(["html", "json"]) === "html" || req.path === "/");
 }
 
 export function serveStatic(app: Express) {
@@ -112,7 +105,14 @@ export function serveStatic(app: Express) {
       return next();
     }
 
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  // Fall through to index.html only for browser navigations. Asset misses such as
+  // /service-worker.js should 404 instead of receiving the SPA shell or another
+  // JavaScript bundle, which can leave browsers displaying/caching server code.
+  app.use("*", (req, res, next) => {
+    if (!acceptsHtml(req)) {
+      return next();
+    }
+
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
