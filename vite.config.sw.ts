@@ -10,7 +10,13 @@ export default defineConfig({
       formats: ["es"],
     },
     outDir: "dist/public",
+    emptyOutDir: false,
     minify: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: "service-worker.js",
+      },
+    },
   },
   plugins: [typescript()],
 });

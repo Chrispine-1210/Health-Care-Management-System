@@ -45,6 +45,10 @@ export async function setupVite(app: Express, server: Server) {
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
 
+    if (!acceptsHtml(req)) {
+      return next();
+    }
+
     try {
       const clientTemplate = path.resolve(
         import.meta.dirname,
@@ -68,19 +72,33 @@ export async function setupVite(app: Express, server: Server) {
   });
 }
 
-export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+function acceptsHtml(req: express.Request) {
+  return req.method === "GET" && (req.accepts(["html", "json"]) === "html" || req.path === "/");
+}
 
-  if (!fs.existsSync(distPath)) {
+export function serveStatic(app: Express) {
+  const candidateDistPaths = [
+    path.resolve(import.meta.dirname, "public"),
+    path.resolve(import.meta.dirname, "..", "public"),
+  ];
+  const distPath = candidateDistPaths.find((candidate) => fs.existsSync(candidate));
+
+  if (!distPath) {
     throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
+      `Could not find the build directory. Checked: ${candidateDistPaths.join(", ")}. Make sure to build the client first`,
     );
   }
 
   app.use(express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  // Fall through to index.html only for browser navigations. Asset misses such as
+  // /service-worker.js should 404 instead of receiving the SPA shell or another
+  // JavaScript bundle, which can leave browsers displaying/caching server code.
+  app.use("*", (req, res, next) => {
+    if (!acceptsHtml(req)) {
+      return next();
+    }
+
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
