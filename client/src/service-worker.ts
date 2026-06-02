@@ -18,8 +18,25 @@ self.addEventListener('install', (event: ExtendableEvent) => {
         console.log('Some assets failed to cache');
       });
     })
-  );
-  self.skipWaiting();
+    .catch(() => {
+      return caches.match(request).then((cached) => {
+        return cached || new Response("Offline - cached data unavailable", { status: 503 });
+      });
+    });
+}
+
+function cacheFirst(request: Request) {
+  return caches.match(request).then((cached) => {
+    if (cached) return cached;
+
+    return fetch(request).then((response) => {
+      return cacheResponse(request, response).then(() => response);
+    });
+  });
+}
+
+self.addEventListener("install", (event: ExtendableEvent) => {
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {
@@ -120,14 +137,15 @@ self.addEventListener('push', (event: PushEvent) => {
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if ('navigate' in client) {
-          return (client as WindowClient).navigate('/orders');
+        if ("navigate" in client) {
+          return (client as WindowClient).navigate("/orders");
         }
       }
+
       if (clients.openWindow) {
-        return clients.openWindow('/orders');
+        return clients.openWindow("/orders");
       }
     }),
   );

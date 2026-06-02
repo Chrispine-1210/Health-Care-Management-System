@@ -1,5 +1,4 @@
 import { defineConfig } from "vite";
-import typescript from "@vitejs/plugin-react";
 
 export default defineConfig({
   build: {
@@ -19,5 +18,4 @@ export default defineConfig({
       },
     },
   },
-  plugins: [typescript()],
 });
