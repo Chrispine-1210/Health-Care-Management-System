@@ -9,6 +9,34 @@ interface RateLimitStore {
 const rateLimitStore: RateLimitStore = {};
 const SENSITIVE_KEYS = new Set(['password', 'token', 'refreshToken', 'accessToken', 'authorization']);
 
+function parseAllowedOrigins() {
+  return (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+}
+
+export const corsHeaders: RequestHandler = (req, res, next) => {
+  const requestOrigin = req.headers.origin?.replace(/\/$/, '');
+  const allowedOrigins = parseAllowedOrigins();
+
+  if (requestOrigin && (allowedOrigins.includes(requestOrigin) || allowedOrigins.includes('*'))) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+};
+
 export function rateLimit(windowMs = 15 * 60 * 1000, maxRequests = 100): RequestHandler {
   return (req, res, next) => {
     const key = `${req.ip}-${req.path}`;
@@ -79,6 +107,6 @@ export const securityHeaders: RequestHandler = (_req, res, next) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https: wss:");
   next();
 };

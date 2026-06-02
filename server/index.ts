@@ -4,11 +4,12 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
-import { securityHeaders, sanitizeRequest, rateLimit } from "./security";
+import { corsHeaders, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
 
 const app = express();
 app.disable("x-powered-by");
+app.use(corsHeaders);
 app.use(securityHeaders);
 app.use(rateLimit());
 
