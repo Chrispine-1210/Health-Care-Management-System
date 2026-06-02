@@ -84,6 +84,11 @@ export default defineConfig({
       },
     },
   },
+  css: {
+    postcss: {
+      from: path.resolve(import.meta.dirname, "client/src/index.css"),
+    },
+  },
   server: {
     middlewareMode: true,
     hmr: {
