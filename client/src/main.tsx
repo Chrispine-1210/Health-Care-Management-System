@@ -3,7 +3,7 @@ import App from "./App";
 import "./index.css";
 
 // Register service worker for offline support and PWA
-if ('serviceWorker' in navigator) {
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js').catch((error) => {
       console.log('Service Worker registration failed (development mode is OK):', error);
