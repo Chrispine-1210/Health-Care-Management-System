@@ -1,94 +1,76 @@
 /// <reference lib="webworker" />
 
-declare const self: ServiceWorkerGlobalScope;
+const sw = globalThis as unknown as ServiceWorkerGlobalScope;
 
-const CACHE_NAME = 'thandizo-v2';
+const CACHE_PREFIX = 'thandizo-';
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const APP_SHELL_URL = '/index.html';
 const PRECACHE_URLS = [APP_SHELL_URL, '/manifest.json'];
 const STATIC_DESTINATIONS = new Set(['script', 'style', 'image', 'font', 'manifest']);
 
-// Install event - cache only the app shell and stable public metadata. Avoid
-// caching '/' so a bad navigation response cannot become the permanent startup
-// page for the app.
-self.addEventListener('install', (event: ExtendableEvent) => {
+sw.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PRECACHE_URLS).catch(() => {
-        // Gracefully handle failures
-        console.log('Some assets failed to cache');
-      });
-    })
-    .catch(() => {
-      return caches.match(request).then((cached) => {
-        return cached || new Response("Offline - cached data unavailable", { status: 503 });
-      });
-    });
-}
-
-function cacheFirst(request: Request) {
-  return caches.match(request).then((cached) => {
-    if (cached) return cached;
-
-    return fetch(request).then((response) => {
-      return cacheResponse(request, response).then(() => response);
-    });
-  });
-}
-
-self.addEventListener("install", (event: ExtendableEvent) => {
-  event.waitUntil(self.skipWaiting());
-});
-
-self.addEventListener('activate', (event: ExtendableEvent) => {
-  event.waitUntil(
-    caches.keys()
-      .then((cacheNames) => Promise.all(
-        cacheNames
-          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
-          .map((name) => caches.delete(name)),
-      ))
-      .then(() => self.clients.claim()),
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then(() => sw.skipWaiting()),
   );
 });
 
-function shouldCacheResponse(response: Response) {
-  const contentType = response.headers.get('content-type') || '';
+sw.addEventListener('activate', (event: ExtendableEvent) => {
+  event.waitUntil(
+    caches.keys()
+      .then((names) => Promise.all(
+        names
+          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+          .map((name) => caches.delete(name)),
+      ))
+      .then(() => sw.clients.claim()),
+  );
+});
 
+function shouldCacheResponse(response: Response): boolean {
+  const contentType = response.headers.get('content-type') || '';
   return response.ok && !contentType.includes('text/html');
 }
 
-function networkFirst(request: Request, fallbackUrl?: string) {
-  return fetch(request).then((response) => {
+async function networkFirst(request: Request): Promise<Response> {
+  try {
+    const response = await fetch(request);
     if (shouldCacheResponse(response)) {
-      const responseClone = response.clone();
-      caches.open(CACHE_NAME).then((cache) => {
-        cache.put(request, responseClone);
-      });
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
     }
     return response;
-  }).catch(() => {
-    return caches.match(request).then((cached) => {
-      if (cached) return cached;
-      if (fallbackUrl) return caches.match(fallbackUrl);
-      return undefined;
-    }).then((cached) => {
-      return cached || new Response('Offline - cached data unavailable', { status: 503 });
-    });
-  });
-}
-
-// Fetch event - network first for navigations/API, cache first for immutable assets
-self.addEventListener('fetch', (event: FetchEvent) => {
-  if (event.request.method !== 'GET') {
-    return;
+  } catch {
+    return (await caches.match(request)) || new Response('Offline - cached data unavailable', { status: 503 });
   }
 }
 
-self.addEventListener('fetch', (event: FetchEvent) => {
+async function cacheFirst(request: Request): Promise<Response> {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (shouldCacheResponse(response)) {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+async function networkOnlyNavigation(request: Request): Promise<Response> {
+  try {
+    return await fetch(request);
+  } catch {
+    return (await caches.match(APP_SHELL_URL)) || new Response('Offline', { status: 503 });
+  }
+}
+
+sw.addEventListener('fetch', (event: FetchEvent) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin || url.pathname === '/service-worker.js') return;
+  if (url.origin !== sw.location.origin || url.pathname === '/service-worker.js') return;
 
   if (event.request.mode === 'navigate') {
     event.respondWith(networkOnlyNavigation(event.request));
@@ -100,53 +82,33 @@ self.addEventListener('fetch', (event: FetchEvent) => {
     return;
   }
 
-  if (!STATIC_DESTINATIONS.has(event.request.destination)) return;
-
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
-        if (shouldCacheResponse(response)) {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return response;
-      });
-    }),
-  );
+  if (STATIC_DESTINATIONS.has(event.request.destination)) {
+    event.respondWith(cacheFirst(event.request));
+  }
 });
 
-self.addEventListener('push', (event: PushEvent) => {
+sw.addEventListener('push', (event: PushEvent) => {
   if (!event.data) return;
-
   const data = event.data.json();
-  const options = {
+  event.waitUntil(sw.registration.showNotification(data.title || 'Thandizo Healthcare', {
     body: data.body || 'New notification from Thandizo Healthcare',
-    icon: '/manifest.json',
-    badge: '/manifest.json',
+    icon: '/favicon.png',
+    badge: '/favicon.png',
     tag: data.tag || 'notification',
-    requireInteraction: data.requireInteraction || false,
-  };
-
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'Thandizo Healthcare', options),
-  );
+    requireInteraction: Boolean(data.requireInteraction),
+  }));
 });
 
-self.addEventListener('notificationclick', (event: NotificationEvent) => {
+sw.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ("navigate" in client) {
-          return (client as WindowClient).navigate("/orders");
-        }
+    sw.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
+      const client = clientList[0] as WindowClient | undefined;
+      if (client) {
+        await client.navigate('/orders');
+        return client.focus();
       }
-
-      if (clients.openWindow) {
-        return clients.openWindow("/orders");
-      }
+      return sw.clients.openWindow('/orders');
     }),
   );
 });

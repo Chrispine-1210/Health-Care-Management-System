@@ -67,7 +67,7 @@ export function registerEmailRoutes(app: Express) {
    * POST /api/notifications/send
    * Send notification (email with template)
    */
-  app.post('/api/notifications/send', authenticateToken, async (req, res) => {
+  app.post('/api/notifications/send', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
     try {
       const payload = sendNotificationSchema.parse(req.body);
       const user = await getStorage().getUser(payload.userId);

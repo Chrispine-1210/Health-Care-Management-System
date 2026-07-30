@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { logger } from './logger';
 import { z } from 'zod';
 
@@ -43,24 +43,24 @@ export interface SessionData {
 // ============================================================================
 
 class PasswordManager {
-  private algorithm = 'sha256';
-  private iterations = 120000;
+  private keyLength = 64;
 
   /**
    * Hash password with salt
    */
   hash(password: string, salt?: string): string {
     const passwordSalt = salt || randomBytes(32).toString('hex');
-    const hash = createHmac(this.algorithm, passwordSalt).update(`${password}:${this.iterations}`).digest('hex');
-    return `${hash}:${passwordSalt}`;
+    const hash = scryptSync(password, passwordSalt, this.keyLength).toString('hex');
+    return `scrypt:${passwordSalt}:${hash}`;
   }
 
   /**
    * Verify password
    */
   verify(password: string, hashedPassword: string): boolean {
-    const [hash, salt] = hashedPassword.split(':');
-    const newHash = createHmac(this.algorithm, salt).update(`${password}:${this.iterations}`).digest('hex');
+    const [algorithm, salt, hash] = hashedPassword.split(':');
+    if (algorithm !== 'scrypt' || !salt || !hash) return false;
+    const newHash = scryptSync(password, salt, this.keyLength).toString('hex');
     const expected = Buffer.from(hash, 'hex');
     const actual = Buffer.from(newHash, 'hex');
     return expected.length === actual.length && timingSafeEqual(expected, actual);
@@ -288,36 +288,8 @@ export class AuthService {
     this.tokenManager = new TokenManager();
     this.sessionManager = new SessionManager();
 
-    this.initializeDemoUsers();
-
     // Cleanup expired sessions every hour
     setInterval(() => this.sessionManager.cleanup(), 60 * 60 * 1000);
-  }
-
-  /**
-   * Initialize demo users with hashed passwords
-   */
-  private initializeDemoUsers(): void {
-    const demoUsers = [
-      { email: 'admin@thandizo.com', password: 'password', role: 'admin', firstName: 'Admin', lastName: 'User' },
-      { email: 'pharmacist@thandizo.com', password: 'password', role: 'pharmacist', firstName: 'Pharmacist', lastName: 'User' },
-      { email: 'staff@thandizo.com', password: 'password', role: 'staff', firstName: 'Staff', lastName: 'User' },
-      { email: 'customer@thandizo.com', password: 'password', role: 'customer', firstName: 'Customer', lastName: 'User' },
-      { email: 'driver@thandizo.com', password: 'password', role: 'driver', firstName: 'Driver', lastName: 'User' },
-    ];
-
-    demoUsers.forEach(user => {
-      const passwordHash = this.passwordManager.hash(user.password);
-      this.users.set(user.email, {
-        email: user.email,
-        passwordHash,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
-    });
-
-    logger.info('Auth service initialized with 5 demo users');
   }
 
   /**

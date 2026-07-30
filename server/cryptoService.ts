@@ -3,7 +3,10 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 const ALGORITHM = 'aes-256-gcm';
 
 function getKey(): Buffer {
-  const configuredKey = process.env.PATIENT_DATA_ENCRYPTION_KEY || process.env.JWT_SECRET || 'development-patient-data-key';
+  const configuredKey = process.env.PATIENT_DATA_ENCRYPTION_KEY;
+  if (!configuredKey) {
+    throw new Error('PATIENT_DATA_ENCRYPTION_KEY is required for sensitive patient data');
+  }
   return createHash('sha256').update(configuredKey).digest();
 }
 

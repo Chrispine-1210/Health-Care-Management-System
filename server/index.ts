@@ -3,7 +3,6 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
-import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import { corsHeaders, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
 
@@ -38,21 +37,10 @@ app.use(sanitizeRequest);
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
       if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
       log(logLine);
     }
@@ -67,9 +55,6 @@ app.use((req, res, next) => {
 (async () => {
   // Seed test data
   await seedTestData();
-
-  // Setup authentication & sessions
-  await setupAuth(app);
 
   // Start inventory automation and register routes
   inventoryIntelligenceService.startDailyScheduler();
@@ -96,7 +81,6 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
     },
     () => {
       log(`Server running on port ${port}`);

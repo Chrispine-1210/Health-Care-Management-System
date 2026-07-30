@@ -15,6 +15,58 @@ import { inventoryIntelligenceService } from "./inventoryIntelligence";
 import { recordAuditEvent } from "./auditService";
 import { z } from "zod";
 import { healthCheck, readinessCheck } from "./healthCheck";
+import {
+  canCreateAppointmentFor,
+  canReadOrder,
+  canReadPatientData,
+  canUpdateAppointment,
+  canUpdateOrder,
+} from "./authorization";
+
+const orderUpdateSchema = z.object({
+  status: z.enum(['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']).optional(),
+  paymentStatus: z.enum(['pending', 'processing', 'completed', 'failed', 'refunded']).optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  deliveryAddress: z.string().max(500).nullable().optional(),
+  deliveryCity: z.string().max(100).nullable().optional(),
+}).strict();
+
+const appointmentUpdateSchema = z.object({
+  practitionerId: z.string().nullable().optional(),
+  branchId: z.string().nullable().optional(),
+  scheduledAt: z.coerce.date().optional(),
+  duration: z.number().int().min(5).max(480).optional(),
+  type: z.enum(['video', 'phone', 'in-person']).optional(),
+  status: z.enum(['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show']).optional(),
+  consultationNotes: z.string().max(10000).nullable().optional(),
+  prescriptionGenerated: z.string().nullable().optional(),
+  videoRoomId: z.string().nullable().optional(),
+  completedAt: z.coerce.date().nullable().optional(),
+}).strict();
+
+const customerAppointmentCreateSchema = z.object({
+  branchId: z.string().nullable().optional(),
+  scheduledAt: z.coerce.date(),
+  duration: z.number().int().min(5).max(120).optional(),
+  type: z.enum(['video', 'phone', 'in-person']),
+  chiefComplaint: z.string().max(2000).nullable().optional(),
+}).strict();
+
+const selfProfileUpdateSchema = z.object({
+  firstName: z.string().max(100).nullable().optional(),
+  lastName: z.string().max(100).nullable().optional(),
+  profileImageUrl: z.string().url().max(2000).nullable().optional(),
+  phone: z.string().max(30).nullable().optional(),
+  allergies: z.array(z.string().max(200)).max(100).nullable().optional(),
+  chronicConditions: z.array(z.string().max(200)).max(100).nullable().optional(),
+  vehicleInfo: z.string().max(1000).nullable().optional(),
+  licenseNumber: z.string().max(100).nullable().optional(),
+}).strict();
+
+const adminUserUpdateSchema = selfProfileUpdateSchema.extend({
+  role: z.enum(['admin', 'pharmacist', 'staff', 'customer', 'driver']).optional(),
+  branchId: z.string().nullable().optional(),
+}).strict();
 
 // Helper function to calculate distance-based delivery cost
 function calculateDeliveryCost(distanceKm: number): number {
@@ -376,7 +428,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/prescriptions/patient/:patientId', authenticateToken, async (req, res) => {
     try {
-      if (req.user!.role === 'customer' && req.user!.id !== req.params.patientId) {
+      if (!canReadPatientData(req.user!, req.params.patientId)) {
         return res.status(403).json({ message: 'Cannot access another patient prescription history' });
       }
       const prescriptions = await getStorage().getPrescriptionsByPatient(req.params.patientId);
@@ -393,7 +445,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!prescription) {
         return res.status(404).json({ message: "Prescription not found" });
       }
-      if (req.user!.role === 'customer' && prescription.patientId !== req.user!.id) {
+      if (!canReadPatientData(req.user!, prescription.patientId)) {
         return res.status(403).json({ message: 'Cannot access another patient prescription' });
       }
       res.json(prescription);
@@ -460,13 +512,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/orders', authenticateToken, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const user = await getStorage().getUser(userId);
-      
       let orders;
-      if (user?.role === 'customer') {
+      if (req.user.role === 'customer') {
         orders = await getStorage().getOrdersByCustomer(userId);
-      } else {
+      } else if (canUpdateOrder(req.user)) {
         orders = await getStorage().getOrders();
+      } else {
+        return res.status(403).json({ message: "Cannot list orders" });
       }
       
       res.json(orders);
@@ -481,6 +533,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const order = await getStorage().getOrder(req.params.id);
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
+      }
+      if (!canReadOrder(req.user!, order)) {
+        return res.status(403).json({ message: "Cannot access this order" });
       }
       
       const items = await getStorage().getOrderItems(order.id);
@@ -559,7 +614,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/orders/:id', authenticateToken, async (req, res) => {
     try {
-      const order = await getStorage().updateOrder(req.params.id, req.body);
+      if (!canUpdateOrder(req.user!)) {
+        return res.status(403).json({ message: "Cannot update orders" });
+      }
+      const changes = orderUpdateSchema.parse(req.body);
+      const order = await getStorage().updateOrder(req.params.id, changes);
       res.json(order);
     } catch (error) {
       console.error("Error updating order:", error);
@@ -627,6 +686,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/deliveries/:id/status', authenticateToken, requireRole('driver', 'admin'), async (req, res) => {
     try {
+      const existingDelivery = await getStorage().getDelivery(req.params.id);
+      if (!existingDelivery) {
+        return res.status(404).json({ message: "Delivery not found" });
+      }
+      if (req.user!.role === 'driver' && existingDelivery.driverId !== req.user!.id) {
+        return res.status(403).json({ message: "Cannot update another driver's delivery" });
+      }
       const { status, proofOfDeliveryUrl, deliveryNotes } = req.body;
       const updateData: any = { status };
       
@@ -671,6 +737,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
+      }
+      if (!canReadOrder(req.user, order)) {
+        return res.status(403).json({ message: "Cannot pay for this order" });
       }
 
       // Import payment gateway
@@ -728,6 +797,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/appointments/patient/:patientId', authenticateToken, async (req, res) => {
     try {
+      if (!canReadPatientData(req.user!, req.params.patientId)) {
+        return res.status(403).json({ message: "Cannot access another patient's appointments" });
+      }
       const appointments = await getStorage().getAppointmentsByPatient(req.params.patientId);
       res.json(appointments);
     } catch (error) {
@@ -738,9 +810,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/appointments', authenticateToken, async (req: any, res) => {
     try {
+      const patientId = req.body.patientId || req.user.id;
+      if (!canCreateAppointmentFor(req.user, patientId)) {
+        return res.status(403).json({ message: "Cannot create an appointment for another patient" });
+      }
+      const appointmentData = req.user.role === 'customer'
+        ? customerAppointmentCreateSchema.parse(req.body)
+        : req.body;
       const appointment = await getStorage().createAppointment({
-        ...req.body,
-        patientId: req.body.patientId || req.user.id,
+        ...appointmentData,
+        patientId,
       });
       res.status(201).json(appointment);
     } catch (error) {
@@ -768,7 +847,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
-      const updated = await getStorage().updateUser(userId, req.body);
+      const changes = currentUser?.role === 'admin'
+        ? adminUserUpdateSchema.parse(req.body)
+        : selfProfileUpdateSchema.parse(req.body);
+      const updated = await getStorage().updateUser(userId, changes);
       res.json(updated);
     } catch (error) {
       console.error("Error updating user:", error);
@@ -901,7 +983,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // APPOINTMENT ROUTES
   // ============================================================================
 
-  app.get('/api/appointments', authenticateToken, async (req: any, res) => {
+  app.get('/api/appointments', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req: any, res) => {
     try {
       const appointments = await getStorage().getAppointments();
       res.json(appointments);
@@ -913,6 +995,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/appointments/patient/:patientId', authenticateToken, async (req, res) => {
     try {
+      if (!canReadPatientData(req.user!, req.params.patientId)) {
+        return res.status(403).json({ message: "Cannot access another patient's appointments" });
+      }
       const appointments = await getStorage().getAppointmentsByPatient(req.params.patientId);
       res.json(appointments);
     } catch (error) {
@@ -941,6 +1026,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!appointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
+      if (!canReadPatientData(req.user!, appointment.patientId)) {
+        return res.status(403).json({ message: "Cannot access this appointment" });
+      }
       res.json(appointment);
     } catch (error) {
       console.error("Error fetching appointment:", error);
@@ -950,7 +1038,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/appointments/:id', authenticateToken, async (req, res) => {
     try {
-      const appointment = await getStorage().updateAppointment(req.params.id, req.body);
+      const existing = await getStorage().getAppointment(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
+      if (!canUpdateAppointment(req.user!, existing)) {
+        return res.status(403).json({ message: "Cannot update this appointment" });
+      }
+      const changes = appointmentUpdateSchema.parse(req.body);
+      const appointment = await getStorage().updateAppointment(req.params.id, changes);
       res.json(appointment);
     } catch (error) {
       console.error("Error updating appointment:", error);
