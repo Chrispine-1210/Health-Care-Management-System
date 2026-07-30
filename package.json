@@ -14,6 +14,7 @@
     "test": "tsx --test server/**/*.test.ts",
     "route-security:generate": "node scripts/route-security-register.mjs",
     "route-security:check": "node scripts/route-security-register.mjs --check",
+    "migration:check": "node scripts/check-migrations.mjs",
     "db:push": "drizzle-kit push",
     "db:migrate": "node scripts/run-migrations.mjs"
   },
