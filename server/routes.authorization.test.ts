@@ -1,0 +1,80 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import express from 'express';
+
+test('registered routes enforce authentication, permissions, ownership, and non-disclosure', async (t) => {
+  process.env.NODE_ENV = 'test';
+  process.env.JWT_SECRET = 'route-authorization-test-secret-at-least-32-characters';
+  process.env.DATABASE_URL = 'postgresql://test:test@127.0.0.1:1/test';
+  const [{ authService }, { MemoryStorage }, { registerRoutes }, { setStorageForTesting }] = await Promise.all([
+    import('./authSystem'),
+    import('./memoryStorage'),
+    import('./routes'),
+    import('./storageManager'),
+  ]);
+  const tokenFor = async (role: string, suffix: string) => {
+    const email = `${role}-${suffix}@example.test`;
+    const password = 'Correct-Horse-42!';
+    await authService.register(email, password, role, role, suffix);
+    const login = await authService.login(email, password);
+    assert.ok(login);
+    return { token: login.tokens.accessToken, userId: login.user.id };
+  };
+  const storage = new MemoryStorage();
+  setStorageForTesting(storage);
+
+  const patientA = await tokenFor('patient', 'route-a');
+  const patientB = await tokenFor('patient', 'route-b');
+  const administrator = await tokenFor('system_administrator', 'route-admin');
+
+  await storage.upsertUser({ id: patientA.userId, email: 'patient-a@example.test', role: 'patient', firstName: 'Patient', lastName: 'A' });
+  await storage.upsertUser({ id: patientB.userId, email: 'patient-b@example.test', role: 'patient', firstName: 'Patient', lastName: 'B' });
+  const orderA = await storage.createOrder({
+    customerId: patientA.userId,
+    branchId: 'branch-a',
+    subtotal: '10.00',
+    total: '10.00',
+    status: 'pending',
+    paymentStatus: 'pending',
+  });
+
+  const app = express();
+  app.use(express.json());
+  const server = await registerRoutes(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    setStorageForTesting(null);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const request = (path: string, token?: string, init: RequestInit = {}) => fetch(`${baseUrl}${path}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...init.headers },
+  });
+
+  const anonymous = await request(`/api/orders/${orderA.id}`);
+  assert.equal(anonymous.status, 401);
+  assert.equal((await anonymous.json() as { message: string }).message, 'No authentication token provided');
+
+  const owner = await request(`/api/orders/${orderA.id}`, patientA.token);
+  assert.equal(owner.status, 200);
+
+  const otherPatient = await request(`/api/orders/${orderA.id}`, patientB.token);
+  assert.equal(otherPatient.status, 403);
+
+  const adminClinicalRead = await request('/api/prescriptions/patient/unknown-patient', administrator.token);
+  assert.equal(adminClinicalRead.status, 403);
+
+  const crossUserUpdate = await request(`/api/users/${patientA.userId}`, patientB.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ firstName: 'Tampered' }),
+  });
+  assert.equal(crossUserUpdate.status, 404);
+  assert.equal((await storage.getUser(patientA.userId))?.firstName, 'Patient');
+
+  const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
+  assert.equal(forbiddenPermission.status, 403);
+  assert.equal((await forbiddenPermission.json() as { message: string }).message, 'Forbidden');
+});

@@ -26,3 +26,10 @@ export function setUseMemory(value: boolean) {
   useMemory = value;
   storageInstance = null; // Reset so it creates a new instance next time
 }
+
+export function setStorageForTesting(storage: IStorage | null) {
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error('Storage injection is only available in the test environment');
+  }
+  storageInstance = storage;
+}

@@ -289,7 +289,7 @@ export class AuthService {
     this.sessionManager = new SessionManager();
 
     // Cleanup expired sessions every hour
-    setInterval(() => this.sessionManager.cleanup(), 60 * 60 * 1000);
+    setInterval(() => this.sessionManager.cleanup(), 60 * 60 * 1000).unref();
   }
 
   /**
@@ -404,7 +404,8 @@ export class AuthService {
       return null;
     }
 
-    return payload as AuthUser;
+    if (typeof payload.sub !== 'string') return null;
+    return { ...payload, id: payload.sub } as AuthUser;
   }
 
   /**
