@@ -1,7 +1,9 @@
 # Health Care Management System Security Audit
 
-Date: 2026-07-30  
-Revision: `0480a9c972aba8dfd894863e3e92293c1e2e805b`  
+Date: 2026-07-30
+
+Revision: `0480a9c972aba8dfd894863e3e92293c1e2e805b`
+
 Scope: repository-wide static review of the active Express server, authentication, authorization, patient-data handling, secrets, and dependency manifest.
 
 ## Executive summary
