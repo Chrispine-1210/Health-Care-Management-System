@@ -15,6 +15,7 @@ import { clinicalDecisionSupportService } from "./clinicalDecisionSupport";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
 import { recordAuditEvent } from "./auditService";
 import { z } from "zod";
+import { insertBranchSchema, insertContentItemSchema, insertDeliverySchema, insertProductSchema, insertStockBatchSchema } from "@shared/schema";
 import { healthCheck, readinessCheck } from "./healthCheck";
 import {
   canCreateAppointmentFor,
@@ -31,6 +32,20 @@ const orderUpdateSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   deliveryAddress: z.string().max(500).nullable().optional(),
   deliveryCity: z.string().max(100).nullable().optional(),
+}).strict();
+
+const orderCreateSchema = z.object({
+  items: z.array(z.object({
+    productId: z.string(),
+    batchId: z.string().optional(),
+    quantity: z.number().int().positive().max(1000),
+  }).strict()).min(1).max(100),
+  branchId: z.string(),
+  deliveryAddress: z.string().max(500).optional(),
+  deliveryCity: z.string().max(100).optional(),
+  deliveryLatitude: z.coerce.number().min(-90).max(90).optional(),
+  deliveryLongitude: z.coerce.number().min(-180).max(180).optional(),
+  paymentMethod: z.enum(['cash', 'airtel_money', 'tnm_mpamba', 'card', 'bank_transfer']).optional(),
 }).strict();
 
 const appointmentUpdateSchema = z.object({
@@ -65,9 +80,38 @@ const selfProfileUpdateSchema = z.object({
   licenseNumber: z.string().max(100).nullable().optional(),
 }).strict();
 
-const adminUserUpdateSchema = selfProfileUpdateSchema.extend({
-  role: z.enum(['admin', 'pharmacist', 'staff', 'customer', 'driver']).optional(),
-  branchId: z.string().nullable().optional(),
+const stockBatchCreateSchema = insertStockBatchSchema.strict();
+const stockBatchUpdateSchema = stockBatchCreateSchema.partial().strict();
+const productCreateSchema = insertProductSchema.strict();
+const productUpdateSchema = productCreateSchema.partial().strict();
+const prescriptionCreateSchema = z.object({
+  fileUrl: z.string().url().max(2000).nullable().optional(),
+  patientAllergies: z.array(z.string().max(200)).max(100).nullable().optional(),
+  patientConditions: z.array(z.string().max(200)).max(100).nullable().optional(),
+  prescribedMedications: z.array(z.object({
+    productId: z.string(),
+    dosage: z.string().max(200),
+    frequency: z.string().max(200),
+    duration: z.string().max(200),
+  }).strict()).max(100).optional(),
+}).strict();
+const prescriptionReviewSchema = z.object({
+  status: z.enum(['approved', 'rejected', 'dispensed']),
+  reviewNotes: z.string().max(5000).nullable().optional(),
+}).strict();
+const deliveryCreateSchema = insertDeliverySchema.pick({ orderId: true, driverId: true, estimatedDeliveryTime: true }).strict();
+const deliveryStatusSchema = z.object({
+  status: z.enum(['assigned', 'picked_up', 'in_transit', 'delivered', 'failed']),
+  proofOfDeliveryUrl: z.string().url().max(2000).optional(),
+  deliveryNotes: z.string().max(5000).optional(),
+}).strict();
+const branchCreateSchema = insertBranchSchema.strict();
+const branchUpdateSchema = branchCreateSchema.partial().strict();
+const contentCreateSchema = insertContentItemSchema.omit({ authorId: true, viewCount: true, publishedAt: true }).strict();
+const contentUpdateSchema = contentCreateSchema.partial().strict();
+const staffAppointmentCreateSchema = customerAppointmentCreateSchema.extend({
+  patientId: z.string(),
+  practitionerId: z.string().nullable().optional(),
 }).strict();
 
 // Helper function to calculate distance-based delivery cost
@@ -105,7 +149,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email,
         firstName: req.user.firstName || 'User',
         lastName: req.user.lastName || '',
-        role: req.user.role || 'customer',
+        role: normalizeHealthcareRole(req.user.role) || 'patient',
       });
       
       res.json(user);
@@ -160,7 +204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/staff/members', authenticateToken, requirePermission(PERMISSIONS.STAFF_MANAGE_BRANCH), async (req, res) => {
     try {
-      const staff = await getStorage().getUsersByRole('staff');
+      const staff = await getStorage().getUsersByRole('receptionist');
       res.json(staff.map(s => ({ ...s, status: 'active', lastActive: 'Just now' })));
     } catch (error) {
       console.error("Error fetching staff:", error);
@@ -179,21 +223,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/prescriptions/:id/review', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_DISPENSE), async (req, res) => {
-    try {
-      const { status, reviewNotes } = req.body;
-      const prescription = await getStorage().updatePrescription(req.params.id, { 
-        status, 
-        reviewNotes,
-        reviewedAt: new Date() 
-      });
-      res.json(prescription);
-    } catch (error) {
-      console.error("Error reviewing prescription:", error);
-      res.status(500).json({ message: "Failed to review prescription" });
-    }
-  });
-
   app.get('/api/admin/stats', authenticateToken, requirePermission(PERMISSIONS.REPORT_VIEW), async (req, res) => {
     try {
       const stats = await getStorage().getDashboardStats();
@@ -201,24 +230,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
       res.status(500).json({ message: "Failed to fetch stats" });
-    }
-  });
-
-  app.get('/api/driver/deliveries/history', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_READ), async (req, res) => {
-    try {
-      const deliveries = await getStorage().getDeliveries();
-      const driverDeliveries = deliveries.filter(d => d.driverId === req.user!.id && d.status === 'delivered');
-      const deliveriesWithDetails = await Promise.all(
-        driverDeliveries.map(async (delivery) => {
-          const order = await getStorage().getOrder(delivery.orderId);
-          const customer = await getStorage().getUser(order!.customerId);
-          return { ...delivery, order, customer };
-        })
-      );
-      res.json(deliveriesWithDetails);
-    } catch (error) {
-      console.error("Error fetching delivery history:", error);
-      res.status(500).json({ message: "Failed to fetch history" });
     }
   });
 
@@ -292,7 +303,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/admin/inventory/batch', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
-      const batch = await getStorage().createStockBatch(req.body);
+      const batch = await getStorage().createStockBatch(stockBatchCreateSchema.parse(req.body));
       res.status(201).json(batch);
     } catch (error) {
       console.error("Error creating stock batch:", error);
@@ -302,7 +313,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/admin/inventory/batch/:id', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
-      const batch = await getStorage().updateStockBatch(req.params.id, req.body);
+      const batch = await getStorage().updateStockBatch(req.params.id, stockBatchUpdateSchema.parse(req.body));
       res.json(batch);
     } catch (error) {
       console.error("Error updating stock batch:", error);
@@ -382,7 +393,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/admin/products', authenticateToken, requirePermission(PERMISSIONS.PRODUCT_MANAGE), async (req, res) => {
     try {
-      const product = await getStorage().createProduct(req.body);
+      const product = await getStorage().createProduct(productCreateSchema.parse(req.body));
       res.status(201).json(product);
     } catch (error) {
       console.error("Error creating product:", error);
@@ -392,7 +403,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/admin/products/:id', authenticateToken, requirePermission(PERMISSIONS.PRODUCT_MANAGE), async (req, res) => {
     try {
-      const product = await getStorage().updateProduct(req.params.id, req.body);
+      const product = await getStorage().updateProduct(req.params.id, productUpdateSchema.parse(req.body));
       res.json(product);
     } catch (error) {
       console.error("Error updating product:", error);
@@ -447,7 +458,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const prescriptionData = {
-        ...req.body,
+        ...prescriptionCreateSchema.parse(req.body),
         patientId: userId,
         status: 'pending' as const,
       };
@@ -464,7 +475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/prescriptions/:id/review', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_DISPENSE), async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const { status, reviewNotes } = req.body;
+      const { status, reviewNotes } = prescriptionReviewSchema.parse(req.body);
       
       const existingPrescription = await getStorage().getPrescription(req.params.id);
       if (!existingPrescription) {
@@ -537,15 +548,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/orders', authenticateToken, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const { items, branchId, deliveryAddress, deliveryCity, deliveryLatitude, deliveryLongitude, paymentMethod } = req.body;
+      const { items, branchId, deliveryAddress, deliveryCity, deliveryLatitude, deliveryLongitude, paymentMethod } = orderCreateSchema.parse(req.body);
       
       // Calculate totals
       let subtotal = 0;
+      const orderLineItems: Array<{ productId: string; batchId?: string; quantity: number; unitPrice: string; subtotal: string }> = [];
       for (const item of items) {
         const product = await getStorage().getProduct(item.productId);
-        if (product) {
-          subtotal += parseFloat(product.price) * item.quantity;
-        }
+        if (!product) return res.status(400).json({ message: "Unknown product" });
+        const lineSubtotal = parseFloat(product.price) * item.quantity;
+        subtotal += lineSubtotal;
+        orderLineItems.push({ ...item, unitPrice: product.price, subtotal: lineSubtotal.toString() });
       }
       
       // Calculate delivery cost if delivery info provided
@@ -554,8 +567,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (deliveryLatitude && deliveryLongitude) {
         // Simple distance calculation (rough approximation)
         distance = Math.sqrt(
-          Math.pow(parseFloat(deliveryLatitude) - (-15.4167), 2) +
-          Math.pow(parseFloat(deliveryLongitude) - (28.2833), 2)
+          Math.pow(deliveryLatitude - (-15.4167), 2) +
+          Math.pow(deliveryLongitude - 28.2833, 2)
         ) * 111; // Rough km conversion
         deliveryCharge = calculateDeliveryCost(distance);
       }
@@ -563,7 +576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const total = subtotal + deliveryCharge;
       
       // Create order
-      const order = await getStorage().createOrder({
+      const { order, items: createdItems } = await getStorage().createOrderWithItems({
         customerId: userId,
         branchId: branchId || 'default-branch-id',
         subtotal: subtotal.toString(),
@@ -577,23 +590,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paymentMethod: paymentMethod || 'cash',
         status: 'pending',
         paymentStatus: 'pending',
-      });
+      }, orderLineItems);
       
-      // Create order items
-      for (const item of items) {
-        const product = await getStorage().getProduct(item.productId);
-        if (product) {
-          await getStorage().createOrderItem({
-            orderId: order.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: product.price,
-            subtotal: (parseFloat(product.price) * item.quantity).toString(),
-          });
-        }
-      }
-      
-      res.status(201).json({ ...order, items });
+      res.status(201).json({ ...order, items: createdItems });
     } catch (error) {
       console.error("Error creating order:", error);
       res.status(500).json({ message: "Failed to create order" });
@@ -621,7 +620,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get active drivers (for customers and pharmacists to see)
   app.get('/api/drivers/active', authenticateToken, async (req, res) => {
     try {
-      const drivers = await getStorage().getUsersByRole('driver');
+      const drivers = await getStorage().getUsersByRole('delivery_driver');
       const activeDrivers = drivers.filter(d => (d as any).isActive !== false);
       
       // Get active deliveries for each driver
@@ -681,7 +680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!canManageDelivery(req.user!, { assignedDriverId: existingDelivery.driverId })) {
         return res.status(404).json({ message: "Delivery not found" });
       }
-      const { status, proofOfDeliveryUrl, deliveryNotes } = req.body;
+      const { status, proofOfDeliveryUrl, deliveryNotes } = deliveryStatusSchema.parse(req.body);
       const updateData: any = { status };
       
       if (status === 'picked_up') {
@@ -710,7 +709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/deliveries', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
-      const delivery = await getStorage().createDelivery(req.body);
+      const delivery = await getStorage().createDelivery(deliveryCreateSchema.parse(req.body));
       res.status(201).json(delivery);
     } catch (error) {
       console.error("Error creating delivery:", error);
@@ -802,9 +801,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!canCreateAppointmentFor(req.user, patientId)) {
         return res.status(403).json({ message: "Cannot create an appointment for another patient" });
       }
-      const appointmentData = req.user.role === 'customer'
+      const appointmentData = normalizeHealthcareRole(req.user.role) === 'patient'
         ? customerAppointmentCreateSchema.parse(req.body)
-        : req.body;
+        : staffAppointmentCreateSchema.parse(req.body);
       const appointment = await getStorage().createAppointment({
         ...appointmentData,
         patientId,
@@ -834,6 +833,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updated = await getStorage().updateUser(userId, changes);
       res.json(updated);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid request body" });
+      }
       console.error("Error updating user:", error);
       res.status(500).json({ message: "Failed to update user" });
     }
@@ -878,7 +880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/admin/branches', authenticateToken, requirePermission(PERMISSIONS.BRANCH_MANAGE), async (req, res) => {
     try {
-      const branch = await getStorage().createBranch(req.body);
+      const branch = await getStorage().createBranch(branchCreateSchema.parse(req.body));
       res.status(201).json(branch);
     } catch (error) {
       console.error("Error creating branch:", error);
@@ -888,7 +890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/admin/branches/:id', authenticateToken, requirePermission(PERMISSIONS.BRANCH_MANAGE), async (req, res) => {
     try {
-      const branch = await getStorage().updateBranch(req.params.id, req.body);
+      const branch = await getStorage().updateBranch(req.params.id, branchUpdateSchema.parse(req.body));
       res.json(branch);
     } catch (error) {
       console.error("Error updating branch:", error);
@@ -927,7 +929,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/admin/content', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const content = await getStorage().createContentItem({ ...req.body, authorId: userId });
+      const content = await getStorage().createContentItem({ ...contentCreateSchema.parse(req.body), authorId: userId });
       res.status(201).json(content);
     } catch (error) {
       console.error("Error creating content:", error);
@@ -937,7 +939,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/admin/content/:id', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (req, res) => {
     try {
-      const content = await getStorage().updateContentItem(req.params.id, req.body);
+      const content = await getStorage().updateContentItem(req.params.id, contentUpdateSchema.parse(req.body));
       res.json(content);
     } catch (error) {
       console.error("Error updating content:", error);
@@ -971,33 +973,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching appointments:", error);
       res.status(500).json({ message: "Failed to fetch appointments" });
-    }
-  });
-
-  app.get('/api/appointments/patient/:patientId', authenticateToken, async (req, res) => {
-    try {
-      if (!canReadPatientData(req.user!, req.params.patientId)) {
-        return res.status(403).json({ message: "Cannot access another patient's appointments" });
-      }
-      const appointments = await getStorage().getAppointmentsByPatient(req.params.patientId);
-      res.json(appointments);
-    } catch (error) {
-      console.error("Error fetching patient appointments:", error);
-      res.status(500).json({ message: "Failed to fetch appointments" });
-    }
-  });
-
-  app.post('/api/appointments', authenticateToken, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const appointment = await getStorage().createAppointment({
-        ...req.body,
-        patientId: userId,
-      });
-      res.status(201).json(appointment);
-    } catch (error) {
-      console.error("Error creating appointment:", error);
-      res.status(500).json({ message: "Failed to create appointment" });
     }
   });
 

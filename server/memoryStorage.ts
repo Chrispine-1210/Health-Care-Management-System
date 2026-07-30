@@ -38,7 +38,7 @@ export class MemoryStorage implements IStorage {
       profileImageUrl: userData.profileImageUrl ?? null,
       phone: userData.phone ?? null,
       // Preserve existing role if user already exists, otherwise use provided or default
-      role: existing?.role || userData.role || 'customer',
+      role: existing?.role || userData.role || 'patient',
       branchId: userData.branchId ?? existing?.branchId ?? null,
       allergies: userData.allergies || existing?.allergies || [],
       chronicConditions: userData.chronicConditions || existing?.chronicConditions || [],
@@ -196,6 +196,21 @@ export class MemoryStorage implements IStorage {
     const order = { id, ...orderData, createdAt: new Date(), updatedAt: new Date() } as Order;
     this.orders.set(id, order);
     return order;
+  }
+
+  async createOrderWithItems(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }> {
+    const orderId = Math.random().toString(36).substring(7);
+    const now = new Date();
+    const order = { id: orderId, ...orderData, createdAt: now, updatedAt: now } as Order;
+    const items = itemData.map((item) => ({
+      id: Math.random().toString(36).substring(7),
+      ...item,
+      orderId,
+      createdAt: now,
+    } as OrderItem));
+    this.orders.set(orderId, order);
+    this.orderItems.set(orderId, items);
+    return { order, items };
   }
 
   async updateOrder(id: string, orderData: Partial<InsertOrder>): Promise<Order> {

@@ -19,7 +19,18 @@ import { z } from "zod";
 // ENUMS
 // ============================================================================
 
-export const userRoleEnum = pgEnum('user_role', ['admin', 'pharmacist', 'staff', 'customer', 'driver']);
+export const userRoleEnum = pgEnum('user_role', [
+  'patient',
+  'doctor',
+  'nurse',
+  'pharmacist',
+  'receptionist',
+  'laboratory_staff',
+  'delivery_driver',
+  'branch_administrator',
+  'system_administrator',
+  'super_administrator',
+]);
 export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed']);
 export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'processing', 'completed', 'failed', 'refunded']);
@@ -52,7 +63,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: userRoleEnum("role").notNull().default('customer'),
+  role: userRoleEnum("role").notNull().default('patient'),
   phone: varchar("phone"),
   branchId: varchar("branch_id"),
   // Medical info for customers

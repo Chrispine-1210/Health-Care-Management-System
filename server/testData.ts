@@ -6,11 +6,11 @@ export async function seedTestData() {
     
     // Create test users for each role
     const testUsers = [
-      { id: "customer-1", email: "customer@test.com", firstName: "John", lastName: "Doe", role: "customer" },
-      { id: "driver-1", email: "driver@test.com", firstName: "Mthunzi", lastName: "Banda", role: "driver" },
+      { id: "customer-1", email: "customer@test.com", firstName: "John", lastName: "Doe", role: "patient" },
+      { id: "driver-1", email: "driver@test.com", firstName: "Mthunzi", lastName: "Banda", role: "delivery_driver" },
       { id: "pharmacist-1", email: "pharmacist@test.com", firstName: "Dr", lastName: "Banda", role: "pharmacist" },
-      { id: "staff-1", email: "staff@test.com", firstName: "Gift", lastName: "Phiri", role: "staff" },
-      { id: "admin-1", email: "admin@test.com", firstName: "Admin", lastName: "User", role: "admin" },
+      { id: "staff-1", email: "staff@test.com", firstName: "Gift", lastName: "Phiri", role: "receptionist" },
+      { id: "admin-1", email: "admin@test.com", firstName: "Admin", lastName: "User", role: "system_administrator" },
     ] as const;
 
     for (const user of testUsers) {

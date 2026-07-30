@@ -74,6 +74,7 @@ export interface IStorage {
   getOrdersByCustomer(customerId: string): Promise<Order[]>;
   getOrdersByBranch(branchId: string): Promise<Order[]>;
   createOrder(order: InsertOrder): Promise<Order>;
+  createOrderWithItems(order: InsertOrder, items: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }>;
   updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order>;
 
   // Order Item operations
@@ -158,7 +159,7 @@ export class DatabaseStorage implements IStorage {
           lastName: userData.lastName ?? null,
           profileImageUrl: userData.profileImageUrl ?? null,
           phone: userData.phone ?? null,
-          role: 'customer',
+          role: 'patient',
           branchId: userData.branchId ?? null,
           allergies: [],
           chronicConditions: [],
@@ -326,6 +327,16 @@ export class DatabaseStorage implements IStorage {
   async createOrder(orderData: InsertOrder): Promise<Order> {
     const [order] = await db.insert(orders).values(orderData).returning();
     return order;
+  }
+
+  async createOrderWithItems(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }> {
+    return db.transaction(async (tx) => {
+      const [order] = await tx.insert(orders).values(orderData).returning();
+      const createdItems = itemData.length
+        ? await tx.insert(orderItems).values(itemData.map((item) => ({ ...item, orderId: order.id }))).returning()
+        : [];
+      return { order, items: createdItems };
+    });
   }
 
   async updateOrder(id: string, orderData: Partial<InsertOrder>): Promise<Order> {
@@ -500,7 +511,7 @@ export class DatabaseStorage implements IStorage {
     const revenue = await db.select({ total: sql<number>`sum(${orders.total})` }).from(orders).where(eq(orders.paymentStatus, 'completed'));
     
     // Get total customers
-    const customers = await db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.role, 'customer'));
+    const customers = await db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.role, 'patient'));
     
     // Get total products
     const productCount = await db.select({ count: sql<number>`count(*)` }).from(products).where(eq(products.isActive, true));

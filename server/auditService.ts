@@ -28,6 +28,7 @@ export async function recordAuditEvent(
   try {
     await getStorage().createAuditLog(auditPayload);
   } catch (error) {
-    logger.error('Audit logging failed', { error, auditPayload });
+    logger.error('Audit logging failed', { error, action: auditPayload.action, entityType: auditPayload.entityType, entityId: auditPayload.entityId });
+    throw error;
   }
 }

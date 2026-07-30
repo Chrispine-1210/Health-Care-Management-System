@@ -51,6 +51,7 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const request = (path: string, token?: string, init: RequestInit = {}) => fetch(`${baseUrl}${path}`, {
     ...init,
+    signal: AbortSignal.timeout(3000),
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...init.headers },
   });
 
@@ -74,7 +75,17 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(crossUserUpdate.status, 404);
   assert.equal((await storage.getUser(patientA.userId))?.firstName, 'Patient');
 
+  const privilegeInjection = await request(`/api/users/${patientA.userId}`, patientA.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ role: 'super_administrator', branchId: 'branch-b' }),
+  });
+  assert.notEqual(privilegeInjection.status, 200);
+  assert.equal((await storage.getUser(patientA.userId))?.role, 'patient');
+  assert.equal((await storage.getUser(patientA.userId))?.branchId, null);
+
   const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
   assert.equal(forbiddenPermission.status, 403);
   assert.equal((await forbiddenPermission.json() as { message: string }).message, 'Forbidden');
+
+  server.closeIdleConnections();
 });

@@ -32,11 +32,11 @@ export function useAuth() {
     user: user || undefined,
     isLoading,
     isAuthenticated,
-    isAdmin: user?.role === "admin",
+    isAdmin: user?.role === "system_administrator" || user?.role === "super_administrator" || user?.role === "branch_administrator",
     isPharmacist: user?.role === "pharmacist",
-    isStaff: user?.role === "staff",
-    isCustomer: user?.role === "customer",
-    isDriver: user?.role === "driver",
+    isStaff: user?.role === "receptionist",
+    isCustomer: user?.role === "patient",
+    isDriver: user?.role === "delivery_driver",
     signOut,
   };
 }
