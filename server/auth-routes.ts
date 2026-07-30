@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { authService } from './authSystem';
-import { authenticateToken, requireRole } from './authMiddleware';
+import { authenticateToken, requirePermission } from './authMiddleware';
+import { PERMISSIONS } from '@shared/healthcareAccess';
 import { logger } from './logger';
 import { z } from 'zod';
 
@@ -82,7 +83,7 @@ export function registerAuthRoutes(app: Express) {
    * POST /api/auth/admin/users
    * Admin-only creation of privileged staff accounts.
    */
-  app.post('/api/auth/admin/users', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.post('/api/auth/admin/users', authenticateToken, requirePermission(PERMISSIONS.STAFF_MANAGE_SYSTEM), async (req, res) => {
     try {
       const { email, password, role, firstName, lastName } = adminRegisterSchema.parse(req.body);
       const result = await authService.register(email, password, role, firstName, lastName);
@@ -160,7 +161,7 @@ export function registerAuthRoutes(app: Express) {
    * GET /api/auth/sessions (Admin only)
    * List all active sessions
    */
-  app.get('/api/auth/sessions', authenticateToken, requireRole('admin'), (req, res) => {
+  app.get('/api/auth/sessions', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), (req, res) => {
     const sessions = authService.getAllSessions();
     res.json({
       success: true,

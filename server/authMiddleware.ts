@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { authService } from './authSystem';
 import { logger } from './logger';
+import { hasPermission, type Permission } from '@shared/healthcareAccess';
 
 /**
  * Auth Middleware - Token validation and role checking
@@ -65,6 +66,17 @@ export const requireRole = (...allowedRoles: string[]) => {
       return res.status(403).json({ success: false, message: `Insufficient permissions. Required: ${allowedRoles.join(', ')}` });
     }
 
+    next();
+  };
+};
+
+export const requirePermission = (permission: Permission) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!hasPermission(req.user.role, permission)) {
+      logger.warn('Permission denied', { userId: req.user.id, permission, path: req.path });
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
     next();
   };
 };

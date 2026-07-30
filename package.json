@@ -9,6 +9,8 @@
     "start": "NODE_ENV=production node dist/server/index.js",
     "check": "tsc",
     "test": "tsx --test server/**/*.test.ts",
+    "route-security:generate": "node scripts/route-security-register.mjs",
+    "route-security:check": "node scripts/route-security-register.mjs --check",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

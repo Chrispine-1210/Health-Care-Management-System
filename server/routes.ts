@@ -1,7 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storageManager";
-import { authenticateToken, requireRole } from "./authMiddleware";
+import { authenticateToken, requirePermission } from "./authMiddleware";
+import { canRoleAssign, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
 import { registerAuthRoutes } from "./auth-routes";
 import { logger } from "./logger";
 import { globalErrorHandler, notFoundHandler, asyncHandler, AppError } from "./errorHandler";
@@ -17,6 +18,7 @@ import { z } from "zod";
 import { healthCheck, readinessCheck } from "./healthCheck";
 import {
   canCreateAppointmentFor,
+  canManageDelivery,
   canReadOrder,
   canReadPatientData,
   canUpdateAppointment,
@@ -117,7 +119,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ADMIN ROUTES
   // ============================================================================
 
-  app.patch('/api/orders/:id/approve', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.patch('/api/orders/:id/approve', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
       const order = await getStorage().updateOrder(req.params.id, { status: 'confirmed' });
       await recordAuditEvent(req, { action: 'order.approve', entityType: 'order', entityId: req.params.id, changes: { status: 'confirmed' } });
@@ -128,7 +130,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/orders/:id/reject', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.patch('/api/orders/:id/reject', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
       const order = await getStorage().updateOrder(req.params.id, { status: 'cancelled' });
       await recordAuditEvent(req, { action: 'order.reject', entityType: 'order', entityId: req.params.id, changes: { status: 'cancelled' } });
@@ -139,7 +141,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/staff/approvals', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.get('/api/staff/approvals', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
       const orders = await getStorage().getOrders();
       const pendingOrders = orders.filter(o => o.status === 'pending');
@@ -156,7 +158,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/staff/members', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.get('/api/staff/members', authenticateToken, requirePermission(PERMISSIONS.STAFF_MANAGE_BRANCH), async (req, res) => {
     try {
       const staff = await getStorage().getUsersByRole('staff');
       res.json(staff.map(s => ({ ...s, status: 'active', lastActive: 'Just now' })));
@@ -166,7 +168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/staff/support-tickets', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.get('/api/staff/support-tickets', authenticateToken, requirePermission(PERMISSIONS.NOTIFICATION_SEND), async (req, res) => {
     try {
       // Get support tickets - placeholder returns empty for now
       // In production, this would query a support_tickets table
@@ -177,7 +179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/prescriptions/:id/review', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+  app.patch('/api/prescriptions/:id/review', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_DISPENSE), async (req, res) => {
     try {
       const { status, reviewNotes } = req.body;
       const prescription = await getStorage().updatePrescription(req.params.id, { 
@@ -192,7 +194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/admin/stats', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.get('/api/admin/stats', authenticateToken, requirePermission(PERMISSIONS.REPORT_VIEW), async (req, res) => {
     try {
       const stats = await getStorage().getDashboardStats();
       res.json(stats);
@@ -202,7 +204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/driver/deliveries/history', authenticateToken, requireRole('driver', 'admin'), async (req, res) => {
+  app.get('/api/driver/deliveries/history', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_READ), async (req, res) => {
     try {
       const deliveries = await getStorage().getDeliveries();
       const driverDeliveries = deliveries.filter(d => d.driverId === req.user!.id && d.status === 'delivered');
@@ -220,7 +222,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/admin/inventory', authenticateToken, requireRole('admin', 'pharmacist'), async (req, res) => {
+  app.get('/api/admin/inventory', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), async (req, res) => {
     try {
       const batches = await getStorage().getStockBatches();
       // Fetch related product and branch data
@@ -238,7 +240,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/admin/branches', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.get('/api/admin/branches', authenticateToken, requirePermission(PERMISSIONS.BRANCH_MANAGE), async (req, res) => {
     try {
       const branches = await getStorage().getBranches();
       res.json(branches);
@@ -248,7 +250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/admin/users', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.get('/api/admin/users', authenticateToken, requirePermission(PERMISSIONS.STAFF_MANAGE_SYSTEM), async (req, res) => {
     try {
       const { role, branchId } = req.query;
       let users;
@@ -268,10 +270,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/admin/users/:id/role', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.patch('/api/admin/users/:id/role', authenticateToken, requirePermission(PERMISSIONS.STAFF_MANAGE_SYSTEM), async (req, res) => {
     try {
-      const { role, branchId } = req.body;
+      const { role, branchId } = z.object({ role: z.enum(HEALTHCARE_ROLES), branchId: z.string().optional() }).strict().parse(req.body);
+      if (req.params.id === req.user!.id || !canRoleAssign(req.user!.role, role)) {
+        await recordAuditEvent(req, { action: 'user.role.change.denied', entityType: 'user', entityId: req.params.id, changes: { requestedRole: role } });
+        return res.status(403).json({ message: 'Forbidden' });
+      }
       const user = await getStorage().updateUserRole(req.params.id, role, branchId);
+      await recordAuditEvent(req, { action: 'user.role.change', entityType: 'user', entityId: req.params.id, changes: { role, branchId: branchId ?? null } });
       res.json(user);
     } catch (error) {
       console.error("Error updating user role:", error);
@@ -283,7 +290,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // INVENTORY/STOCK ROUTES
   // ============================================================================
 
-  app.post('/api/admin/inventory/batch', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
+  app.post('/api/admin/inventory/batch', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
       const batch = await getStorage().createStockBatch(req.body);
       res.status(201).json(batch);
@@ -293,7 +300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/admin/inventory/batch/:id', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
+  app.patch('/api/admin/inventory/batch/:id', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
       const batch = await getStorage().updateStockBatch(req.params.id, req.body);
       res.json(batch);
@@ -303,7 +310,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/inventory/low-stock', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
+  app.get('/api/inventory/low-stock', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), async (req, res) => {
     try {
       const { threshold } = req.query;
       const batches = await getStorage().getLowStockBatches(threshold ? parseInt(threshold as string) : 10);
@@ -314,7 +321,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/inventory/expiring', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
+  app.get('/api/inventory/expiring', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), async (req, res) => {
     try {
       const { days } = req.query;
       const batches = await getStorage().getExpiringBatches(days ? parseInt(days as string) : 30);
@@ -373,7 +380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/products', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.post('/api/admin/products', authenticateToken, requirePermission(PERMISSIONS.PRODUCT_MANAGE), async (req, res) => {
     try {
       const product = await getStorage().createProduct(req.body);
       res.status(201).json(product);
@@ -383,7 +390,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/admin/products/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.patch('/api/admin/products/:id', authenticateToken, requirePermission(PERMISSIONS.PRODUCT_MANAGE), async (req, res) => {
     try {
       const product = await getStorage().updateProduct(req.params.id, req.body);
       res.json(product);
@@ -397,7 +404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PRESCRIPTION ROUTES
   // ============================================================================
 
-  app.get('/api/prescriptions/pending', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+  app.get('/api/prescriptions/pending', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_DISPENSE), async (req, res) => {
     try {
       const prescriptions = await getStorage().getPendingPrescriptions();
       res.json(prescriptions);
@@ -454,7 +461,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/prescriptions/:id/review', authenticateToken, requireRole('pharmacist', 'admin'), async (req: any, res) => {
+  app.patch('/api/prescriptions/:id/review', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_DISPENSE), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { status, reviewNotes } = req.body;
@@ -494,7 +501,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       let orders;
-      if (req.user.role === 'customer') {
+      if (normalizeHealthcareRole(req.user.role) === 'patient') {
         orders = await getStorage().getOrdersByCustomer(userId);
       } else if (canUpdateOrder(req.user)) {
         orders = await getStorage().getOrders();
@@ -633,7 +640,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/driver/deliveries/active', authenticateToken, requireRole('driver'), async (req: any, res) => {
+  app.get('/api/driver/deliveries/active', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_READ), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const deliveries = await getStorage().getDeliveriesByDriver(userId);
@@ -655,7 +662,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/deliveries', authenticateToken, requireRole('admin', 'staff'), async (req, res) => {
+  app.get('/api/deliveries', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_READ), async (req, res) => {
     try {
       const deliveries = await getStorage().getActiveDeliveries();
       res.json(deliveries);
@@ -665,14 +672,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/deliveries/:id/status', authenticateToken, requireRole('driver', 'admin'), async (req, res) => {
+  app.patch('/api/deliveries/:id/status', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_MANAGE), async (req, res) => {
     try {
       const existingDelivery = await getStorage().getDelivery(req.params.id);
       if (!existingDelivery) {
         return res.status(404).json({ message: "Delivery not found" });
       }
-      if (req.user!.role === 'driver' && existingDelivery.driverId !== req.user!.id) {
-        return res.status(403).json({ message: "Cannot update another driver's delivery" });
+      if (!canManageDelivery(req.user!, { assignedDriverId: existingDelivery.driverId })) {
+        return res.status(404).json({ message: "Delivery not found" });
       }
       const { status, proofOfDeliveryUrl, deliveryNotes } = req.body;
       const updateData: any = { status };
@@ -701,7 +708,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/deliveries', authenticateToken, requireRole('admin', 'staff'), async (req, res) => {
+  app.post('/api/deliveries', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
       const delivery = await getStorage().createDelivery(req.body);
       res.status(201).json(delivery);
@@ -816,21 +823,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/users/:id', authenticateToken, async (req: any, res) => {
     try {
       const userId = req.params.id;
-      const currentUser = await getStorage().getUser(req.user.id);
-      
-      // Users can only update their own profile (unless admin)
-      if (currentUser?.role !== 'admin' && userId !== req.user.id) {
-        return res.status(403).json({ message: "Unauthorized" });
-      }
+      if (userId !== req.user.id) return res.status(404).json({ message: "User not found" });
 
       const user = await getStorage().getUser(userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      const changes = currentUser?.role === 'admin'
-        ? adminUserUpdateSchema.parse(req.body)
-        : selfProfileUpdateSchema.parse(req.body);
+      const changes = selfProfileUpdateSchema.parse(req.body);
       const updated = await getStorage().updateUser(userId, changes);
       res.json(updated);
     } catch (error) {
@@ -866,7 +866,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/admin/audit-logs', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.get('/api/admin/audit-logs', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), async (req, res) => {
     try {
       const logs = await getStorage().getAuditLogs();
       res.json(logs);
@@ -876,7 +876,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/branches', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.post('/api/admin/branches', authenticateToken, requirePermission(PERMISSIONS.BRANCH_MANAGE), async (req, res) => {
     try {
       const branch = await getStorage().createBranch(req.body);
       res.status(201).json(branch);
@@ -886,7 +886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/admin/branches/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.patch('/api/admin/branches/:id', authenticateToken, requirePermission(PERMISSIONS.BRANCH_MANAGE), async (req, res) => {
     try {
       const branch = await getStorage().updateBranch(req.params.id, req.body);
       res.json(branch);
@@ -924,7 +924,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/content', authenticateToken, requireRole('admin'), async (req: any, res) => {
+  app.post('/api/admin/content', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const content = await getStorage().createContentItem({ ...req.body, authorId: userId });
@@ -935,7 +935,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/admin/content/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.patch('/api/admin/content/:id', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (req, res) => {
     try {
       const content = await getStorage().updateContentItem(req.params.id, req.body);
       res.json(content);
@@ -949,7 +949,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // AUDIT LOG ROUTES
   // ============================================================================
 
-  app.get('/api/audit-logs', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.get('/api/audit-logs', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), async (req, res) => {
     try {
       const { limit } = req.query;
       const logs = await getStorage().getAuditLogs(limit ? parseInt(limit as string) : undefined);
@@ -964,7 +964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // APPOINTMENT ROUTES
   // ============================================================================
 
-  app.get('/api/appointments', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req: any, res) => {
+  app.get('/api/appointments', authenticateToken, requirePermission(PERMISSIONS.APPOINTMENT_READ), async (req: any, res) => {
     try {
       const appointments = await getStorage().getAppointments();
       res.json(appointments);
@@ -1039,7 +1039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DRIVER HISTORY & STAFF STATS ROUTES
   // ============================================================================
 
-  app.get('/api/driver/deliveries/history', authenticateToken, requireRole('driver'), async (req: any, res) => {
+  app.get('/api/driver/deliveries/history', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_READ), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const deliveries = await getStorage().getDeliveriesByDriver(userId);
@@ -1061,7 +1061,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/staff/stats', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.get('/api/staff/stats', authenticateToken, requirePermission(PERMISSIONS.REPORT_VIEW), async (req, res) => {
     try {
       const orders = await getStorage().getOrders();
       const todayOrders = orders.filter(o => {
@@ -1103,7 +1103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     maxAttempts: z.number().int().min(1).max(5).optional(),
   });
 
-  app.post('/api/notifications/events', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), async (req, res) => {
+  app.post('/api/notifications/events', authenticateToken, requirePermission(PERMISSIONS.NOTIFICATION_SEND), async (req, res) => {
     try {
       const payload = notificationEventSchema.parse(req.body);
       const job = await notificationService.enqueue(payload);
@@ -1115,15 +1115,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/notifications/delivery-logs', authenticateToken, requireRole('admin', 'pharmacist'), (_req, res) => {
+  app.get('/api/notifications/delivery-logs', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), (_req, res) => {
     res.json({ success: true, data: notificationService.getDeliveryLogs() });
   });
 
   app.patch('/api/notifications/preferences/:userId', authenticateToken, async (req: any, res) => {
     try {
-      if (req.user.role !== 'admin' && req.user.id !== req.params.userId) {
-        return res.status(403).json({ success: false, message: 'Cannot modify another user notification preferences' });
-      }
+      if (req.user.id !== req.params.userId) return res.status(404).json({ success: false, message: 'User not found' });
       const payload = z.object({ channel: z.enum(['email', 'sms']), optedOut: z.boolean() }).parse(req.body);
       notificationService.setOptOut(req.params.userId, payload.channel, payload.optedOut);
       await recordAuditEvent(req, { action: 'notification.preference.update', entityType: 'user', entityId: req.params.userId, changes: payload });
@@ -1148,7 +1146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }).default({}),
   });
 
-  app.post('/api/clinical/interaction-check', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+  app.post('/api/clinical/interaction-check', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_READ), async (req, res) => {
     try {
       const payload = clinicalCheckSchema.parse(req.body);
       const alerts = clinicalDecisionSupportService.evaluatePrescription(payload.medications, payload.patient);
@@ -1159,7 +1157,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/clinical/overrides', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+  app.post('/api/clinical/overrides', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_DISPENSE), async (req, res) => {
     try {
       const payload = z.object({
         prescriptionId: z.string(),
@@ -1173,7 +1171,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/inventory/scan', authenticateToken, requireRole('admin', 'pharmacist'), async (req, res) => {
+  app.post('/api/inventory/scan', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
       const alerts = await inventoryIntelligenceService.scanInventory();
       await inventoryIntelligenceService.notifyCriticalAlerts(alerts);
@@ -1185,11 +1183,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/inventory/alerts', authenticateToken, requireRole('admin', 'pharmacist', 'staff'), (_req, res) => {
+  app.get('/api/inventory/alerts', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), (_req, res) => {
     res.json({ success: true, data: inventoryIntelligenceService.getDashboardAlerts() });
   });
 
-  app.get('/api/engineering/control-center', authenticateToken, requireRole('admin'), async (_req, res) => {
+  app.get('/api/engineering/control-center', authenticateToken, requirePermission(PERMISSIONS.SYSTEM_CONFIGURE), async (_req, res) => {
     const auditLogs = await getStorage().getAuditLogs(50);
     const notificationJobs = notificationService.getQueueStatus();
     const inventoryAlerts = inventoryIntelligenceService.getDashboardAlerts();
