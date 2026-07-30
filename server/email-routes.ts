@@ -78,8 +78,8 @@ export function registerEmailRoutes(app: Express) {
 
       const success = await notificationService.send({
         userId: payload.userId,
-        userEmail: user.email,
-        firstName: user.firstName,
+        userEmail: user.email ?? '',
+        firstName: user.firstName ?? '',
         type: payload.type,
         data: payload.data,
       });

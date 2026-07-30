@@ -27,29 +27,40 @@ export class MemoryStorage implements IStorage {
 
   async upsertUser(userData: UpsertUser): Promise<User> {
     // Check if user exists to preserve their role
-    const existing = this.users.get(userData.id);
+    const id = userData.id ?? crypto.randomUUID();
+    const existing = this.users.get(id);
     
     const user: User = {
-      id: userData.id,
-      email: userData.email,
-      firstName: userData.firstName,
-      lastName: userData.lastName,
-      profileImageUrl: userData.profileImageUrl,
-      phone: userData.phone,
+      id,
+      email: userData.email ?? null,
+      firstName: userData.firstName ?? null,
+      lastName: userData.lastName ?? null,
+      profileImageUrl: userData.profileImageUrl ?? null,
+      phone: userData.phone ?? null,
       // Preserve existing role if user already exists, otherwise use provided or default
       role: existing?.role || userData.role || 'customer',
-      branchId: userData.branchId || existing?.branchId,
+      branchId: userData.branchId ?? existing?.branchId ?? null,
       allergies: userData.allergies || existing?.allergies || [],
       chronicConditions: userData.chronicConditions || existing?.chronicConditions || [],
+      vehicleInfo: userData.vehicleInfo ?? existing?.vehicleInfo ?? null,
+      licenseNumber: userData.licenseNumber ?? existing?.licenseNumber ?? null,
       createdAt: existing?.createdAt || new Date(),
       updatedAt: new Date(),
     };
-    this.users.set(userData.id, user);
+    this.users.set(id, user);
     return user;
   }
 
   async getAllUsers(): Promise<User[]> {
     return Array.from(this.users.values());
+  }
+
+  async updateUser(id: string, data: Partial<UpsertUser>): Promise<User> {
+    const user = this.users.get(id);
+    if (!user) throw new Error("User not found");
+    const updated: User = { ...user, ...data, id, updatedAt: new Date() };
+    this.users.set(id, updated);
+    return updated;
   }
 
   async getUsersByRole(role: string): Promise<User[]> {
@@ -81,7 +92,7 @@ export class MemoryStorage implements IStorage {
 
   async createBranch(branchData: InsertBranch): Promise<Branch> {
     const id = Math.random().toString(36).substring(7);
-    const branch: Branch = { id, ...branchData, createdAt: new Date(), updatedAt: new Date() };
+    const branch = { id, ...branchData, createdAt: new Date(), updatedAt: new Date() } as Branch;
     this.branches.set(id, branch);
     return branch;
   }
@@ -109,7 +120,7 @@ export class MemoryStorage implements IStorage {
 
   async createProduct(productData: InsertProduct): Promise<Product> {
     const id = Math.random().toString(36).substring(7);
-    const product: Product = { id, ...productData, createdAt: new Date(), updatedAt: new Date() };
+    const product = { id, ...productData, createdAt: new Date(), updatedAt: new Date() } as Product;
     this.products.set(id, product);
     return product;
   }
@@ -136,7 +147,7 @@ export class MemoryStorage implements IStorage {
   }
 
   async getLowStockBatches(threshold: number): Promise<StockBatch[]> {
-    return Array.from(this.stockBatches.values()).filter(b => b.quantityOnHand <= threshold);
+    return Array.from(this.stockBatches.values()).filter(b => b.quantity <= threshold);
   }
 
   async getExpiringBatches(daysThreshold: number): Promise<StockBatch[]> {
@@ -150,7 +161,7 @@ export class MemoryStorage implements IStorage {
 
   async createStockBatch(batchData: InsertStockBatch): Promise<StockBatch> {
     const id = Math.random().toString(36).substring(7);
-    const batch: StockBatch = { id, ...batchData, createdAt: new Date(), updatedAt: new Date() };
+    const batch = { id, ...batchData, createdAt: new Date(), updatedAt: new Date() } as StockBatch;
     this.stockBatches.set(id, batch);
     return batch;
   }
@@ -182,7 +193,7 @@ export class MemoryStorage implements IStorage {
 
   async createOrder(orderData: InsertOrder): Promise<Order> {
     const id = Math.random().toString(36).substring(7);
-    const order: Order = { id, ...orderData, createdAt: new Date(), updatedAt: new Date() };
+    const order = { id, ...orderData, createdAt: new Date(), updatedAt: new Date() } as Order;
     this.orders.set(id, order);
     return order;
   }
@@ -202,7 +213,7 @@ export class MemoryStorage implements IStorage {
 
   async createOrderItem(itemData: InsertOrderItem): Promise<OrderItem> {
     const id = Math.random().toString(36).substring(7);
-    const item: OrderItem = { id, ...itemData, createdAt: new Date(), updatedAt: new Date() };
+    const item = { id, ...itemData, createdAt: new Date() } as OrderItem;
     const items = this.orderItems.get(itemData.orderId) || [];
     items.push(item);
     this.orderItems.set(itemData.orderId, items);
@@ -228,7 +239,7 @@ export class MemoryStorage implements IStorage {
 
   async createPrescription(prescriptionData: InsertPrescription): Promise<Prescription> {
     const id = Math.random().toString(36).substring(7);
-    const prescription: Prescription = { id, ...prescriptionData, createdAt: new Date(), updatedAt: new Date() };
+    const prescription = { id, ...prescriptionData, createdAt: new Date(), updatedAt: new Date() } as Prescription;
     this.prescriptions.set(id, prescription);
     return prescription;
   }
@@ -251,16 +262,16 @@ export class MemoryStorage implements IStorage {
   }
 
   async getDeliveriesByDriver(driverId: string): Promise<Delivery[]> {
-    return Array.from(this.deliveries.values()).filter(d => d.assignedDriverId === driverId);
+    return Array.from(this.deliveries.values()).filter(d => d.driverId === driverId);
   }
 
   async getActiveDeliveries(): Promise<Delivery[]> {
-    return Array.from(this.deliveries.values()).filter(d => d.status !== 'delivered' && d.status !== 'cancelled');
+    return Array.from(this.deliveries.values()).filter(d => d.status !== 'delivered');
   }
 
   async createDelivery(deliveryData: InsertDelivery): Promise<Delivery> {
     const id = Math.random().toString(36).substring(7);
-    const delivery: Delivery = { id, ...deliveryData, createdAt: new Date(), updatedAt: new Date() };
+    const delivery = { id, ...deliveryData, createdAt: new Date(), updatedAt: new Date() } as Delivery;
     this.deliveries.set(id, delivery);
     return delivery;
   }
@@ -292,7 +303,7 @@ export class MemoryStorage implements IStorage {
 
   async createAppointment(appointmentData: InsertAppointment): Promise<Appointment> {
     const id = Math.random().toString(36).substring(7);
-    const appointment: Appointment = { id, ...appointmentData, createdAt: new Date(), updatedAt: new Date() };
+    const appointment = { id, ...appointmentData, createdAt: new Date(), updatedAt: new Date() } as Appointment;
     this.appointments.set(id, appointment);
     return appointment;
   }
@@ -322,7 +333,7 @@ export class MemoryStorage implements IStorage {
 
   async createContentItem(contentData: InsertContentItem): Promise<ContentItem> {
     const id = Math.random().toString(36).substring(7);
-    const content: ContentItem = { id, ...contentData, createdAt: new Date(), updatedAt: new Date() };
+    const content = { id, ...contentData, createdAt: new Date(), updatedAt: new Date() } as ContentItem;
     this.contentItems.set(id, content);
     return content;
   }
@@ -338,13 +349,18 @@ export class MemoryStorage implements IStorage {
   // Audit Logs
   async createAuditLog(logData: InsertAuditLog): Promise<AuditLog> {
     const id = Math.random().toString(36).substring(7);
-    const log: AuditLog = { id, ...logData, createdAt: new Date() };
+    const log: AuditLog = {
+      id, userId: logData.userId ?? null, action: logData.action,
+      entityType: logData.entityType ?? null, entityId: logData.entityId ?? null,
+      changes: logData.changes ?? null, ipAddress: logData.ipAddress ?? null,
+      userAgent: logData.userAgent ?? null, timestamp: new Date(),
+    };
     this.auditLogs.push(log);
     return log;
   }
 
   async getAuditLogs(limit?: number): Promise<AuditLog[]> {
-    const logs = this.auditLogs.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+    const logs = this.auditLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     return limit ? logs.slice(0, limit) : logs;
   }
 

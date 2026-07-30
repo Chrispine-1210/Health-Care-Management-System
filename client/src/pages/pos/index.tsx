@@ -90,7 +90,7 @@ export default function POSPage() {
   });
 
   const cartTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
+    () => cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0),
     [cart]
   );
 

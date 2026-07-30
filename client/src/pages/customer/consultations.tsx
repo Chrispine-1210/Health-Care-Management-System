@@ -40,7 +40,7 @@ export default function ConsultationsPage() {
     enabled: isAuthenticated && !authLoading && !!user?.id,
   });
 
-  const createAppointmentMutation = useMutation({
+  const createAppointmentMutation = useMutation<Response, Error, { type: string; scheduledAt: string; chiefComplaint: string; status: string; duration: number }>({
     mutationFn: async (data) => {
       return apiRequest("/api/appointments", {
         method: "POST",

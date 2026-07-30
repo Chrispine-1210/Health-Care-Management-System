@@ -5,7 +5,7 @@ export default function SignOutPage() {
   const { signOut } = useAuth();
 
   useEffect(() => {
-    void signOut({ redirectTo: "/login" });
+    void signOut();
   }, [signOut]);
 
   return (

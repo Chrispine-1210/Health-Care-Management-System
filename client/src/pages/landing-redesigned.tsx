@@ -78,7 +78,7 @@ const roleHighlights = [
 ];
 
 export default function Landing() {
-  const { data: products, isLoading } = useQuery<Product[]>({
+  const { data: products, isLoading, isError } = useQuery<Product[]>({
     queryKey: ["/api/products"],
     staleTime: 5 * 60 * 1000,
     throwOnError: false,
@@ -316,7 +316,7 @@ export default function Landing() {
                         <h3 className="text-lg font-black">{product.name}</h3>
                         <p className="text-sm text-muted-foreground">{product.category}</p>
                       </div>
-                      {product.requiresPrescription && <Badge variant="outline">Rx</Badge>}
+                      {product.prescriptionRequired && <Badge variant="outline">Rx</Badge>}
                     </div>
                     <p className="mt-5 text-2xl font-black text-primary">MK {product.price}</p>
                   </CardContent>

@@ -113,25 +113,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/logout', async (req, res) => {
-    try {
-      // Clear session if using express-session
-      if (req.session?.destroy) {
-        req.session.destroy((err) => {
-          if (err) {
-            return res.status(500).json({ message: "Logout failed" });
-          }
-          res.json({ message: "Logged out successfully" });
-        });
-      } else {
-        res.json({ message: "Logged out successfully" });
-      }
-    } catch (error) {
-      console.error("Logout error:", error);
-      res.status(500).json({ message: "Logout failed" });
-    }
-  });
-
   // ============================================================================
   // ADMIN ROUTES
   // ============================================================================

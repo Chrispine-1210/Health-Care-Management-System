@@ -19,7 +19,7 @@ export function getStorage(): IStorage {
     }
   }
   
-  return storageInstance;
+  return storageInstance!;
 }
 
 export function setUseMemory(value: boolean) {

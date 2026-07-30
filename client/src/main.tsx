@@ -10,16 +10,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     });
   });
 
-  await registration.update();
 }
-
-window.addEventListener("load", () => {
-  if (!import.meta.env.PROD) return;
-
-  registerServiceWorker().catch((error) => {
-    console.warn("Service worker maintenance failed:", error);
-  });
-});
 
 const rootElement = document.getElementById("root");
 

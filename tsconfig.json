@@ -8,13 +8,19 @@
     "node_modules",
     "build",
     "dist",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "server/auth.ts",
+    "server/electron-main.ts",
+    "server/preload.ts",
+    "server/vite.config.ts",
+    "server/vite.config.sw.ts"
   ],
   "compilerOptions": {
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
     "noEmit": true,
     "module": "ESNext",
+    "target": "ES2020",
     "strict": true,
     "lib": [
       "esnext",

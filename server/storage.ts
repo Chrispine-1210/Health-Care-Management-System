@@ -152,16 +152,18 @@ export class DatabaseStorage implements IStorage {
       if (error.code === 'XX000' || error.message?.includes('disabled')) {
         console.warn("Database endpoint disabled, falling back to memory");
         return {
-          id: userData.id,
-          email: userData.email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          profileImageUrl: userData.profileImageUrl,
-          phone: userData.phone,
+          id: userData.id ?? crypto.randomUUID(),
+          email: userData.email ?? null,
+          firstName: userData.firstName ?? null,
+          lastName: userData.lastName ?? null,
+          profileImageUrl: userData.profileImageUrl ?? null,
+          phone: userData.phone ?? null,
           role: 'customer',
-          branchId: userData.branchId,
+          branchId: userData.branchId ?? null,
           allergies: [],
           chronicConditions: [],
+          vehicleInfo: null,
+          licenseNumber: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };

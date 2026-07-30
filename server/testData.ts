@@ -11,7 +11,7 @@ export async function seedTestData() {
       { id: "pharmacist-1", email: "pharmacist@test.com", firstName: "Dr", lastName: "Banda", role: "pharmacist" },
       { id: "staff-1", email: "staff@test.com", firstName: "Gift", lastName: "Phiri", role: "staff" },
       { id: "admin-1", email: "admin@test.com", firstName: "Admin", lastName: "User", role: "admin" },
-    ];
+    ] as const;
 
     for (const user of testUsers) {
       await storage.upsertUser(user);
@@ -19,9 +19,9 @@ export async function seedTestData() {
 
     // Create test products
     const products = [
-      { id: "prod-1", name: "Paracetamol 500mg", category: "Pain Relief", price: "250", requiresPrescription: false },
-      { id: "prod-2", name: "Amoxicillin 500mg", category: "Antibiotics", price: "1500", requiresPrescription: true },
-      { id: "prod-3", name: "Vitamin C", category: "Supplements", price: "800", requiresPrescription: false },
+      { name: "Paracetamol 500mg", sku: "PARA-500", category: "Pain Relief", price: "250", prescriptionRequired: false },
+      { name: "Amoxicillin 500mg", sku: "AMOX-500", category: "Antibiotics", price: "1500", prescriptionRequired: true },
+      { name: "Vitamin C", sku: "VIT-C", category: "Supplements", price: "800", prescriptionRequired: false },
     ];
 
     for (const product of products) {
@@ -31,6 +31,8 @@ export async function seedTestData() {
     // Create test orders
     const order = await storage.createOrder({
       customerId: "customer-1",
+      branchId: "default-branch-id",
+      subtotal: "500",
       total: "1000",
       status: "pending",
       deliveryAddress: "123 Main St, Lilongwe",
@@ -45,7 +47,7 @@ export async function seedTestData() {
         orderId: order.id,
         driverId: "driver-1",
         status: "assigned",
-        estimatedDeliveryTime: new Date(Date.now() + 3600000).toISOString(),
+        estimatedDeliveryTime: new Date(Date.now() + 3600000),
       });
     }
 

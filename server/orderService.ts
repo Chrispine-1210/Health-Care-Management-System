@@ -12,7 +12,7 @@ export class OrderService {
     return baseFee + Math.ceil(distanceKm * perKm);
   }
 
-  static async createOrder(customerId: string, items: any[], paymentMethod: string, deliveryLocation?: any) {
+  static async createOrder(customerId: string, items: any[], paymentMethod: 'cash' | 'airtel_money' | 'tnm_mpamba' | 'card' | 'bank_transfer', deliveryLocation?: any) {
     try {
       const storage = getStorage();
       
@@ -23,10 +23,11 @@ export class OrderService {
 
       const order = await storage.createOrder({
         customerId,
-        items,
+        branchId: deliveryLocation?.branchId || 'default-branch-id',
+        subtotal: String(itemTotal),
         paymentMethod,
-        total,
-        deliveryFee,
+        total: String(total),
+        deliveryCharge: String(deliveryFee),
         status: 'pending',
         notes: deliveryLocation?.notes,
       });
@@ -39,7 +40,7 @@ export class OrderService {
     }
   }
 
-  static async updateOrderStatus(orderId: string, status: string) {
+  static async updateOrderStatus(orderId: string, status: 'pending' | 'confirmed' | 'processing' | 'ready' | 'in_transit' | 'delivered' | 'cancelled') {
     try {
       const storage = getStorage();
       const order = await storage.updateOrder(orderId, { status });

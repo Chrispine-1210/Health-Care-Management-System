@@ -54,7 +54,7 @@ app.use((req, res, next) => {
 // ──────────────────────────────
 (async () => {
   // Seed test data
-  await seedTestData();
+  if (process.env.NODE_ENV === 'development') await seedTestData();
 
   // Start inventory automation and register routes
   inventoryIntelligenceService.startDailyScheduler();
