@@ -3,14 +3,17 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
-import { corsHeaders, securityHeaders, sanitizeRequest, rateLimit } from "./security";
+import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
 
 const app = express();
 app.disable("x-powered-by");
 app.use(corsHeaders);
 app.use(securityHeaders);
+app.use(correlationId);
 app.use(rateLimit());
+app.use('/api/auth/login', rateLimit(15 * 60 * 1000, 10));
+app.use('/api/auth/register', rateLimit(60 * 60 * 1000, 5));
 
 declare module "http" {
   interface IncomingMessage {
@@ -23,12 +26,13 @@ declare module "http" {
 // ──────────────────────────────
 app.use(
   express.json({
+    limit: '1mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   })
 );
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(sanitizeRequest);
 
 // ──────────────────────────────
