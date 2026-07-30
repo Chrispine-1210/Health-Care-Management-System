@@ -443,6 +443,11 @@ export class AuthService {
     return { success: true, message: 'User registered successfully' };
   }
 
+  confirmPassword(email: string, password: string): boolean {
+    const user = this.users.get(email);
+    return Boolean(user && this.passwordManager.verify(password, user.passwordHash));
+  }
+
   /**
    * Get all sessions (admin only)
    */

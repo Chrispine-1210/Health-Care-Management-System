@@ -17,14 +17,28 @@ import { recordAuditEvent } from "./auditService";
 import { z } from "zod";
 import { insertBranchSchema, insertContentItemSchema, insertDeliverySchema, insertProductSchema, insertStockBatchSchema } from "@shared/schema";
 import { healthCheck, readinessCheck } from "./healthCheck";
+import { authService } from "./authSystem";
+import { breakGlassService } from "./breakGlassService";
 import {
   canCreateAppointmentFor,
   canManageDelivery,
   canReadOrder,
   canReadPatientData,
+  canReadPatientRecord,
   canUpdateAppointment,
   canUpdateOrder,
 } from "./authorization";
+
+function canReadPatientFromRequest(req: { user?: { id: string; role: string }; headers: Record<string, unknown> }, patientId: string): boolean {
+  if (!req.user) return false;
+  if (canReadPatientData(req.user, patientId)) return true;
+  const grantId = typeof req.headers['x-emergency-access-id'] === 'string' ? req.headers['x-emergency-access-id'] : '';
+  const grant = breakGlassService.getValidGrant(grantId, req.user.id, patientId);
+  return Boolean(grant && canReadPatientRecord(req.user, {
+    patientId,
+    emergencyAccess: { active: true, expiresAt: grant.expiresAt, reason: grant.justification, elevatedAuth: true },
+  }));
+}
 
 const orderUpdateSchema = z.object({
   status: z.enum(['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']).optional(),
@@ -112,6 +126,17 @@ const contentUpdateSchema = contentCreateSchema.partial().strict();
 const staffAppointmentCreateSchema = customerAppointmentCreateSchema.extend({
   patientId: z.string(),
   practitionerId: z.string().nullable().optional(),
+}).strict();
+const breakGlassActivationSchema = z.object({
+  patientId: z.string(),
+  reasonCode: z.enum(['immediate_threat', 'continuity_of_care', 'system_outage']),
+  justification: z.string().min(20).max(2000),
+  durationMinutes: z.number().int().min(1).max(15).default(15),
+  password: z.string().min(1).max(500),
+}).strict();
+const breakGlassReviewSchema = z.object({
+  state: z.enum(['approved', 'rejected', 'closed']),
+  notes: z.string().min(10).max(2000),
 }).strict();
 
 // Helper function to calculate distance-based delivery cost
@@ -427,7 +452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/prescriptions/patient/:patientId', authenticateToken, async (req, res) => {
     try {
-      if (!canReadPatientData(req.user!, req.params.patientId)) {
+      if (!canReadPatientFromRequest(req, req.params.patientId)) {
         return res.status(403).json({ message: 'Cannot access another patient prescription history' });
       }
       const prescriptions = await getStorage().getPrescriptionsByPatient(req.params.patientId);
@@ -444,7 +469,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!prescription) {
         return res.status(404).json({ message: "Prescription not found" });
       }
-      if (!canReadPatientData(req.user!, prescription.patientId)) {
+      if (!canReadPatientFromRequest(req, prescription.patientId)) {
         return res.status(403).json({ message: 'Cannot access another patient prescription' });
       }
       res.json(prescription);
@@ -784,7 +809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/appointments/patient/:patientId', authenticateToken, async (req, res) => {
     try {
-      if (!canReadPatientData(req.user!, req.params.patientId)) {
+      if (!canReadPatientFromRequest(req, req.params.patientId)) {
         return res.status(403).json({ message: "Cannot access another patient's appointments" });
       }
       const appointments = await getStorage().getAppointmentsByPatient(req.params.patientId);
@@ -962,6 +987,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/emergency-access', authenticateToken, requirePermission(PERMISSIONS.PATIENT_PROFILE_READ), async (req, res) => {
+    try {
+      const payload = breakGlassActivationSchema.parse(req.body);
+      if (!authService.confirmPassword(req.user!.email, payload.password)) {
+        await recordAuditEvent(req, { action: 'emergency_access.denied', entityType: 'patient', entityId: payload.patientId, changes: { reasonCode: payload.reasonCode, outcome: 'denied' } });
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const grant = breakGlassService.activate({
+        actorId: req.user!.id,
+        patientId: payload.patientId,
+        reasonCode: payload.reasonCode,
+        justification: payload.justification,
+        durationMinutes: payload.durationMinutes,
+      });
+      await recordAuditEvent(req, { action: 'emergency_access.activated', entityType: 'patient', entityId: payload.patientId, changes: { grantId: grant.id, reasonCode: grant.reasonCode, expiresAt: grant.expiresAt, outcome: 'success' } });
+      await notificationService.enqueue({
+        eventType: 'security.emergency_access',
+        channels: [],
+        recipient: { userId: 'security-operations' },
+        template: 'system-alert',
+        variables: { title: 'Emergency access activated', message: `Grant ${grant.id} requires review.` },
+      });
+      res.status(201).json({ id: grant.id, patientId: grant.patientId, expiresAt: grant.expiresAt, reviewState: grant.reviewState });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid request body' });
+      res.status(500).json({ message: 'Emergency access activation failed' });
+    }
+  });
+
+  app.patch('/api/emergency-access/:id/review', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), async (req, res) => {
+    try {
+      const payload = breakGlassReviewSchema.parse(req.body);
+      const grant = breakGlassService.review(req.params.id, req.user!.id, payload.state, payload.notes);
+      if (!grant) return res.status(404).json({ message: 'Emergency access grant not found' });
+      await recordAuditEvent(req, { action: `emergency_access.${payload.state}`, entityType: 'emergency_access', entityId: grant.id, changes: { outcome: 'success' } });
+      res.json({ id: grant.id, reviewState: grant.reviewState, reviewedAt: grant.reviewedAt });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid request body' });
+      res.status(500).json({ message: 'Emergency access review failed' });
+    }
+  });
+
   // ============================================================================
   // APPOINTMENT ROUTES
   // ============================================================================
@@ -982,7 +1049,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!appointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
-      if (!canReadPatientData(req.user!, appointment.patientId)) {
+      if (!canReadPatientFromRequest(req, appointment.patientId)) {
         return res.status(403).json({ message: "Cannot access this appointment" });
       }
       res.json(appointment);
