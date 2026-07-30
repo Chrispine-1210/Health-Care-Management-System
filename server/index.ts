@@ -5,6 +5,10 @@ import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
 import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
+import { pool } from "./db";
+import { validateProductionEnvironment } from "./config";
+
+validateProductionEnvironment();
 
 const app = express();
 app.disable("x-powered-by");
@@ -90,4 +94,12 @@ app.use((req, res, next) => {
       log(`Server running on port ${port}`);
     }
   );
+
+  const shutdown = (signal: string) => {
+    log(`${signal} received; shutting down`);
+    server.close(() => void pool.end().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 })();
