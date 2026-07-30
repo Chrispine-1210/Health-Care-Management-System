@@ -82,6 +82,20 @@ export class MemoryStorage implements IStorage {
     return user;
   }
 
+  async assignUserRoleWithAudit(id: string, role: string, branchId: string | undefined, audit: InsertAuditLog): Promise<User> {
+    const current = this.users.get(id);
+    if (!current) throw new Error('User not found');
+    const previous = { ...current };
+    try {
+      const user = await this.updateUserRole(id, role, branchId);
+      await this.createAuditLog(audit);
+      return user;
+    } catch (error) {
+      this.users.set(id, previous);
+      throw error;
+    }
+  }
+
   // Branches
   async getBranches(): Promise<Branch[]> {
     return Array.from(this.branches.values());
@@ -284,6 +298,19 @@ export class MemoryStorage implements IStorage {
     const updated = { ...prescription, ...prescriptionData, updatedAt: new Date() };
     this.prescriptions.set(id, updated);
     return updated;
+  }
+
+  async reviewPrescriptionWithAudit(id: string, prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription> {
+    const previous = this.prescriptions.get(id);
+    if (!previous) throw new Error('Prescription not found');
+    try {
+      const prescription = await this.updatePrescription(id, prescriptionData);
+      await this.createAuditLog(audit);
+      return prescription;
+    } catch (error) {
+      this.prescriptions.set(id, previous);
+      throw error;
+    }
   }
 
   // Deliveries

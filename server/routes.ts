@@ -13,7 +13,7 @@ import { registerEmailRoutes } from "./email-routes";
 import { notificationService } from "./notificationService";
 import { clinicalDecisionSupportService } from "./clinicalDecisionSupport";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
-import { recordAuditEvent } from "./auditService";
+import { buildAuditEvent, recordAuditEvent } from "./auditService";
 import { z } from "zod";
 import { insertBranchSchema, insertContentItemSchema, insertDeliverySchema, insertProductSchema, insertStockBatchSchema } from "@shared/schema";
 import { healthCheck, readinessCheck } from "./healthCheck";
@@ -313,8 +313,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await recordAuditEvent(req, { action: 'user.role.change.denied', entityType: 'user', entityId: req.params.id, changes: { requestedRole: role } });
         return res.status(403).json({ message: 'Forbidden' });
       }
-      const user = await getStorage().updateUserRole(req.params.id, role, branchId);
-      await recordAuditEvent(req, { action: 'user.role.change', entityType: 'user', entityId: req.params.id, changes: { role, branchId: branchId ?? null } });
+      const audit = buildAuditEvent(req, { action: 'user.role.change', entityType: 'user', entityId: req.params.id, changes: { role, branchId: branchId ?? null } });
+      const user = await getStorage().assignUserRoleWithAudit(req.params.id, role, branchId, audit);
+      authService.logout(req.params.id);
       res.json(user);
     } catch (error) {
       console.error("Error updating user role:", error);
@@ -516,13 +517,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: 'Clinical safety override justification required before approval', alerts });
       }
 
-      const prescription = await getStorage().updatePrescription(req.params.id, {
+      const audit = buildAuditEvent(req, { action: 'prescription.review', entityType: 'prescription', entityId: req.params.id, changes: { status, reviewedBy: userId, alertCount: alerts.length } });
+      const prescription = await getStorage().reviewPrescriptionWithAudit(req.params.id, {
         status,
         reviewNotes,
         reviewedBy: userId,
         reviewedAt: new Date(),
-      });
-      await recordAuditEvent(req, { action: 'prescription.review', entityType: 'prescription', entityId: req.params.id, changes: { status, reviewedBy: userId, alertCount: alerts.length } });
+      }, audit);
       
       res.json(prescription);
     } catch (error) {

@@ -11,11 +11,11 @@ export interface SensitiveAuditEvent {
   changes?: Record<string, unknown>;
 }
 
-export async function recordAuditEvent(
+export function buildAuditEvent(
   req: Pick<Request, 'ip' | 'headers' | 'user'>,
   event: SensitiveAuditEvent,
-): Promise<void> {
-  const auditPayload: InsertAuditLog = {
+): InsertAuditLog {
+  return {
     userId: req.user?.id,
     action: event.action,
     entityType: event.entityType,
@@ -24,7 +24,13 @@ export async function recordAuditEvent(
     ipAddress: req.ip,
     userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
   };
+}
 
+export async function recordAuditEvent(
+  req: Pick<Request, 'ip' | 'headers' | 'user'>,
+  event: SensitiveAuditEvent,
+): Promise<void> {
+  const auditPayload = buildAuditEvent(req, event);
   try {
     await getStorage().createAuditLog(auditPayload);
   } catch (error) {

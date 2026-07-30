@@ -45,6 +45,7 @@ export interface IStorage {
   getUsersByRole(role: string): Promise<User[]>;
   getUsersByBranch(branchId: string): Promise<User[]>;
   updateUserRole(id: string, role: string, branchId?: string): Promise<User>;
+  assignUserRoleWithAudit(id: string, role: string, branchId: string | undefined, audit: InsertAuditLog): Promise<User>;
 
   // Branch operations
   getBranches(): Promise<Branch[]>;
@@ -91,6 +92,7 @@ export interface IStorage {
   getPendingPrescriptions(): Promise<Prescription[]>;
   createPrescription(prescription: InsertPrescription): Promise<Prescription>;
   updatePrescription(id: string, prescription: Partial<InsertPrescription>): Promise<Prescription>;
+  reviewPrescriptionWithAudit(id: string, prescription: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription>;
 
   // Delivery operations
   getAllDeliveriesForOperations(): Promise<Delivery[]>;
@@ -207,6 +209,17 @@ export class DatabaseStorage implements IStorage {
     }
     const [user] = await db.update(users).set(updateData).where(eq(users.id, id)).returning();
     return user;
+  }
+
+  async assignUserRoleWithAudit(id: string, role: string, branchId: string | undefined, audit: InsertAuditLog): Promise<User> {
+    return db.transaction(async (tx) => {
+      const updateData: any = { role, updatedAt: new Date() };
+      if (branchId !== undefined) updateData.branchId = branchId;
+      const [user] = await tx.update(users).set(updateData).where(eq(users.id, id)).returning();
+      if (!user) throw new Error('User not found');
+      await tx.insert(auditLogs).values(audit);
+      return user;
+    });
   }
 
   // Branch operations
@@ -412,6 +425,18 @@ export class DatabaseStorage implements IStorage {
       .where(eq(prescriptions.id, id))
       .returning();
     return prescription;
+  }
+
+  async reviewPrescriptionWithAudit(id: string, prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription> {
+    return db.transaction(async (tx) => {
+      const [prescription] = await tx.update(prescriptions)
+        .set({ ...prescriptionData, updatedAt: new Date() })
+        .where(eq(prescriptions.id, id))
+        .returning();
+      if (!prescription) throw new Error('Prescription not found');
+      await tx.insert(auditLogs).values(audit);
+      return prescription;
+    });
   }
 
   // Delivery operations
