@@ -39,6 +39,7 @@ export class MemoryStorage implements IStorage {
       phone: userData.phone ?? null,
       // Preserve existing role if user already exists, otherwise use provided or default
       role: existing?.role || userData.role || 'patient',
+      accountStatus: userData.accountStatus || existing?.accountStatus || 'active',
       branchId: userData.branchId ?? existing?.branchId ?? null,
       allergies: userData.allergies || existing?.allergies || [],
       chronicConditions: userData.chronicConditions || existing?.chronicConditions || [],
@@ -51,7 +52,7 @@ export class MemoryStorage implements IStorage {
     return user;
   }
 
-  async getAllUsers(): Promise<User[]> {
+  async getAllUsersForAdministration(): Promise<User[]> {
     return Array.from(this.users.values());
   }
 
@@ -175,7 +176,7 @@ export class MemoryStorage implements IStorage {
   }
 
   // Orders
-  async getOrders(): Promise<Order[]> {
+  async getAllOrdersForOperations(): Promise<Order[]> {
     return Array.from(this.orders.values());
   }
 
@@ -196,6 +197,18 @@ export class MemoryStorage implements IStorage {
     const order = { id, ...orderData, createdAt: new Date(), updatedAt: new Date() } as Order;
     this.orders.set(id, order);
     return order;
+  }
+
+  async getOrderForOwner(id: string, ownerId: string): Promise<Order | undefined> {
+    if (!id || !ownerId) return undefined;
+    const order = this.orders.get(id);
+    return order?.customerId === ownerId ? order : undefined;
+  }
+
+  async getOrderWithinBranch(id: string, branchId: string): Promise<Order | undefined> {
+    if (!id || !branchId) return undefined;
+    const order = this.orders.get(id);
+    return order?.branchId === branchId ? order : undefined;
   }
 
   async createOrderWithItems(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }> {
@@ -248,6 +261,12 @@ export class MemoryStorage implements IStorage {
     return Array.from(this.prescriptions.values()).filter(p => p.patientId === patientId);
   }
 
+  async getPrescriptionForPatient(id: string, patientId: string): Promise<Prescription | undefined> {
+    if (!id || !patientId) return undefined;
+    const prescription = this.prescriptions.get(id);
+    return prescription?.patientId === patientId ? prescription : undefined;
+  }
+
   async getPendingPrescriptions(): Promise<Prescription[]> {
     return Array.from(this.prescriptions.values()).filter(p => p.status === 'pending' || p.status === 'under_review');
   }
@@ -268,12 +287,18 @@ export class MemoryStorage implements IStorage {
   }
 
   // Deliveries
-  async getDeliveries(): Promise<Delivery[]> {
+  async getAllDeliveriesForOperations(): Promise<Delivery[]> {
     return Array.from(this.deliveries.values());
   }
 
   async getDelivery(id: string): Promise<Delivery | undefined> {
     return this.deliveries.get(id);
+  }
+
+  async getAssignedDelivery(id: string, driverId: string): Promise<Delivery | undefined> {
+    if (!id || !driverId) return undefined;
+    const delivery = this.deliveries.get(id);
+    return delivery?.driverId === driverId ? delivery : undefined;
   }
 
   async getDeliveriesByDriver(driverId: string): Promise<Delivery[]> {
@@ -300,12 +325,18 @@ export class MemoryStorage implements IStorage {
   }
 
   // Appointments
-  async getAppointments(): Promise<Appointment[]> {
+  async getAllAppointmentsForOperations(): Promise<Appointment[]> {
     return Array.from(this.appointments.values());
   }
 
   async getAppointment(id: string): Promise<Appointment | undefined> {
     return this.appointments.get(id);
+  }
+
+  async getAppointmentForPatient(id: string, patientId: string): Promise<Appointment | undefined> {
+    if (!id || !patientId) return undefined;
+    const appointment = this.appointments.get(id);
+    return appointment?.patientId === patientId ? appointment : undefined;
   }
 
   async getAppointmentsByPatient(patientId: string): Promise<Appointment[]> {

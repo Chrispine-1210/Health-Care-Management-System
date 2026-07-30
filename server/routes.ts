@@ -212,7 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/staff/approvals', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
-      const orders = await getStorage().getOrders();
+      const orders = await getStorage().getAllOrdersForOperations();
       const pendingOrders = orders.filter(o => o.status === 'pending');
       const ordersWithDetails = await Promise.all(
         pendingOrders.map(async (order) => {
@@ -296,7 +296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (branchId) {
         users = await getStorage().getUsersByBranch(branchId as string);
       } else {
-        users = await getStorage().getAllUsers();
+        users = await getStorage().getAllUsersForAdministration();
       }
       
       res.json(users);
@@ -465,7 +465,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/prescriptions/:id', authenticateToken, async (req, res) => {
     try {
-      const prescription = await getStorage().getPrescription(req.params.id);
+      const prescription = normalizeHealthcareRole(req.user!.role) === 'patient'
+        ? await getStorage().getPrescriptionForPatient(req.params.id, req.user!.id)
+        : await getStorage().getPrescription(req.params.id);
       if (!prescription) {
         return res.status(404).json({ message: "Prescription not found" });
       }
@@ -540,7 +542,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (normalizeHealthcareRole(req.user.role) === 'patient') {
         orders = await getStorage().getOrdersByCustomer(userId);
       } else if (canUpdateOrder(req.user)) {
-        orders = await getStorage().getOrders();
+        orders = await getStorage().getAllOrdersForOperations();
       } else {
         return res.status(403).json({ message: "Cannot list orders" });
       }
@@ -554,12 +556,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/orders/:id', authenticateToken, async (req, res) => {
     try {
-      const order = await getStorage().getOrder(req.params.id);
+      const order = normalizeHealthcareRole(req.user!.role) === 'patient'
+        ? await getStorage().getOrderForOwner(req.params.id, req.user!.id)
+        : await getStorage().getOrder(req.params.id);
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
       }
       if (!canReadOrder(req.user!, order)) {
-        return res.status(403).json({ message: "Cannot access this order" });
+        return res.status(404).json({ message: "Order not found" });
       }
       
       const items = await getStorage().getOrderItems(order.id);
@@ -698,7 +702,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/deliveries/:id/status', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_MANAGE), async (req, res) => {
     try {
-      const existingDelivery = await getStorage().getDelivery(req.params.id);
+      const existingDelivery = await getStorage().getAssignedDelivery(req.params.id, req.user!.id);
       if (!existingDelivery) {
         return res.status(404).json({ message: "Delivery not found" });
       }
@@ -1035,7 +1039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/appointments', authenticateToken, requirePermission(PERMISSIONS.APPOINTMENT_READ), async (req: any, res) => {
     try {
-      const appointments = await getStorage().getAppointments();
+      const appointments = await getStorage().getAllAppointmentsForOperations();
       res.json(appointments);
     } catch (error) {
       console.error("Error fetching appointments:", error);
@@ -1045,7 +1049,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/appointments/:id', authenticateToken, async (req, res) => {
     try {
-      const appointment = await getStorage().getAppointment(req.params.id);
+      const appointment = normalizeHealthcareRole(req.user!.role) === 'patient'
+        ? await getStorage().getAppointmentForPatient(req.params.id, req.user!.id)
+        : await getStorage().getAppointment(req.params.id);
       if (!appointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
@@ -1105,7 +1111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/staff/stats', authenticateToken, requirePermission(PERMISSIONS.REPORT_VIEW), async (req, res) => {
     try {
-      const orders = await getStorage().getOrders();
+      const orders = await getStorage().getAllOrdersForOperations();
       const todayOrders = orders.filter(o => {
         const orderDate = new Date(o.createdAt || '').toDateString();
         return orderDate === new Date().toDateString();

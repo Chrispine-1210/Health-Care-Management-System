@@ -31,6 +31,7 @@ export const userRoleEnum = pgEnum('user_role', [
   'system_administrator',
   'super_administrator',
 ]);
+export const accountStatusEnum = pgEnum('account_status', ['active', 'disabled', 'locked']);
 export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed']);
 export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'processing', 'completed', 'failed', 'refunded']);
@@ -64,6 +65,7 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   role: userRoleEnum("role").notNull().default('patient'),
+  accountStatus: accountStatusEnum("account_status").notNull().default('active'),
   phone: varchar("phone"),
   branchId: varchar("branch_id"),
   // Medical info for customers

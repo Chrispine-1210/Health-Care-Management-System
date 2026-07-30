@@ -41,7 +41,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   updateUser(id: string, data: Partial<UpsertUser>): Promise<User>;
-  getAllUsers(): Promise<User[]>;
+  getAllUsersForAdministration(): Promise<User[]>;
   getUsersByRole(role: string): Promise<User[]>;
   getUsersByBranch(branchId: string): Promise<User[]>;
   updateUserRole(id: string, role: string, branchId?: string): Promise<User>;
@@ -69,8 +69,10 @@ export interface IStorage {
   updateStockBatch(id: string, batch: Partial<InsertStockBatch>): Promise<StockBatch>;
 
   // Order operations
-  getOrders(): Promise<Order[]>;
+  getAllOrdersForOperations(): Promise<Order[]>;
   getOrder(id: string): Promise<Order | undefined>;
+  getOrderForOwner(id: string, ownerId: string): Promise<Order | undefined>;
+  getOrderWithinBranch(id: string, branchId: string): Promise<Order | undefined>;
   getOrdersByCustomer(customerId: string): Promise<Order[]>;
   getOrdersByBranch(branchId: string): Promise<Order[]>;
   createOrder(order: InsertOrder): Promise<Order>;
@@ -85,21 +87,24 @@ export interface IStorage {
   getPrescriptions(): Promise<Prescription[]>;
   getPrescription(id: string): Promise<Prescription | undefined>;
   getPrescriptionsByPatient(patientId: string): Promise<Prescription[]>;
+  getPrescriptionForPatient(id: string, patientId: string): Promise<Prescription | undefined>;
   getPendingPrescriptions(): Promise<Prescription[]>;
   createPrescription(prescription: InsertPrescription): Promise<Prescription>;
   updatePrescription(id: string, prescription: Partial<InsertPrescription>): Promise<Prescription>;
 
   // Delivery operations
-  getDeliveries(): Promise<Delivery[]>;
+  getAllDeliveriesForOperations(): Promise<Delivery[]>;
   getDelivery(id: string): Promise<Delivery | undefined>;
+  getAssignedDelivery(id: string, driverId: string): Promise<Delivery | undefined>;
   getDeliveriesByDriver(driverId: string): Promise<Delivery[]>;
   getActiveDeliveries(): Promise<Delivery[]>;
   createDelivery(delivery: InsertDelivery): Promise<Delivery>;
   updateDelivery(id: string, delivery: Partial<InsertDelivery>): Promise<Delivery>;
 
   // Appointment operations
-  getAppointments(): Promise<Appointment[]>;
+  getAllAppointmentsForOperations(): Promise<Appointment[]>;
   getAppointment(id: string): Promise<Appointment | undefined>;
+  getAppointmentForPatient(id: string, patientId: string): Promise<Appointment | undefined>;
   getAppointmentsByPatient(patientId: string): Promise<Appointment[]>;
   getAppointmentsByPractitioner(practitionerId: string): Promise<Appointment[]>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
@@ -160,6 +165,7 @@ export class DatabaseStorage implements IStorage {
           profileImageUrl: userData.profileImageUrl ?? null,
           phone: userData.phone ?? null,
           role: 'patient',
+          accountStatus: 'active',
           branchId: userData.branchId ?? null,
           allergies: [],
           chronicConditions: [],
@@ -177,7 +183,7 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(users).where(eq(users.role, role as any));
   }
 
-  async getAllUsers(): Promise<User[]> {
+  async getAllUsersForAdministration(): Promise<User[]> {
     return await db.select().from(users).orderBy(users.email);
   }
 
@@ -307,7 +313,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Order operations
-  async getOrders(): Promise<Order[]> {
+  async getAllOrdersForOperations(): Promise<Order[]> {
     return await db.select().from(orders).orderBy(desc(orders.createdAt));
   }
 
@@ -326,6 +332,18 @@ export class DatabaseStorage implements IStorage {
 
   async createOrder(orderData: InsertOrder): Promise<Order> {
     const [order] = await db.insert(orders).values(orderData).returning();
+    return order;
+  }
+
+  async getOrderForOwner(id: string, ownerId: string): Promise<Order | undefined> {
+    if (!id || !ownerId) return undefined;
+    const [order] = await db.select().from(orders).where(and(eq(orders.id, id), eq(orders.customerId, ownerId)));
+    return order;
+  }
+
+  async getOrderWithinBranch(id: string, branchId: string): Promise<Order | undefined> {
+    if (!id || !branchId) return undefined;
+    const [order] = await db.select().from(orders).where(and(eq(orders.id, id), eq(orders.branchId, branchId)));
     return order;
   }
 
@@ -372,6 +390,12 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(prescriptions).where(eq(prescriptions.patientId, patientId)).orderBy(desc(prescriptions.createdAt));
   }
 
+  async getPrescriptionForPatient(id: string, patientId: string): Promise<Prescription | undefined> {
+    if (!id || !patientId) return undefined;
+    const [prescription] = await db.select().from(prescriptions).where(and(eq(prescriptions.id, id), eq(prescriptions.patientId, patientId)));
+    return prescription;
+  }
+
   async getPendingPrescriptions(): Promise<Prescription[]> {
     return await db.select().from(prescriptions).where(eq(prescriptions.status, 'pending')).orderBy(prescriptions.createdAt);
   }
@@ -391,12 +415,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Delivery operations
-  async getDeliveries(): Promise<Delivery[]> {
+  async getAllDeliveriesForOperations(): Promise<Delivery[]> {
     return await db.select().from(deliveries).orderBy(desc(deliveries.createdAt));
   }
 
   async getDelivery(id: string): Promise<Delivery | undefined> {
     const [delivery] = await db.select().from(deliveries).where(eq(deliveries.id, id));
+    return delivery;
+  }
+
+  async getAssignedDelivery(id: string, driverId: string): Promise<Delivery | undefined> {
+    if (!id || !driverId) return undefined;
+    const [delivery] = await db.select().from(deliveries).where(and(eq(deliveries.id, id), eq(deliveries.driverId, driverId)));
     return delivery;
   }
 
@@ -429,12 +459,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Appointment operations
-  async getAppointments(): Promise<Appointment[]> {
+  async getAllAppointmentsForOperations(): Promise<Appointment[]> {
     return await db.select().from(appointments).orderBy(appointments.scheduledAt);
   }
 
   async getAppointment(id: string): Promise<Appointment | undefined> {
     const [appointment] = await db.select().from(appointments).where(eq(appointments.id, id));
+    return appointment;
+  }
+
+  async getAppointmentForPatient(id: string, patientId: string): Promise<Appointment | undefined> {
+    if (!id || !patientId) return undefined;
+    const [appointment] = await db.select().from(appointments).where(and(eq(appointments.id, id), eq(appointments.patientId, patientId)));
     return appointment;
   }
 

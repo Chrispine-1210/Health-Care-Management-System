@@ -26,9 +26,11 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   const patientA = await tokenFor('patient', 'route-a');
   const patientB = await tokenFor('patient', 'route-b');
   const administrator = await tokenFor('system_administrator', 'route-admin');
+  const branchAdministrator = await tokenFor('branch_administrator', 'route-branch-admin');
 
   await storage.upsertUser({ id: patientA.userId, email: 'patient-a@example.test', role: 'patient', firstName: 'Patient', lastName: 'A' });
   await storage.upsertUser({ id: patientB.userId, email: 'patient-b@example.test', role: 'patient', firstName: 'Patient', lastName: 'B' });
+  await storage.upsertUser({ id: branchAdministrator.userId, email: 'branch-admin@example.test', role: 'branch_administrator', branchId: 'branch-a' });
   const orderA = await storage.createOrder({
     customerId: patientA.userId,
     branchId: 'branch-a',
@@ -37,6 +39,7 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     status: 'pending',
     paymentStatus: 'pending',
   });
+  const orderB = await storage.createOrder({ customerId: patientB.userId, branchId: 'branch-b', subtotal: '10.00', total: '10.00' });
 
   const app = express();
   app.use(express.json());
@@ -63,7 +66,13 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(owner.status, 200);
 
   const otherPatient = await request(`/api/orders/${orderA.id}`, patientB.token);
-  assert.equal(otherPatient.status, 403);
+  assert.equal(otherPatient.status, 404);
+  assert.equal((await otherPatient.json() as { message: string }).message, 'Order not found');
+
+  const sameBranchOrder = await request(`/api/orders/${orderA.id}`, branchAdministrator.token);
+  assert.equal(sameBranchOrder.status, 200);
+  const wrongBranchOrder = await request(`/api/orders/${orderB.id}`, branchAdministrator.token);
+  assert.equal(wrongBranchOrder.status, 404);
 
   const adminClinicalRead = await request('/api/prescriptions/patient/unknown-patient', administrator.token);
   assert.equal(adminClinicalRead.status, 403);
@@ -86,6 +95,11 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
   assert.equal(forbiddenPermission.status, 403);
   assert.equal((await forbiddenPermission.json() as { message: string }).message, 'Forbidden');
+
+  await storage.updateUser(patientB.userId, { accountStatus: 'disabled' });
+  const disabledUser = await request('/api/orders', patientB.token);
+  assert.equal(disabledUser.status, 401);
+  assert.equal((await disabledUser.json() as { message: string }).message, 'Invalid or expired token');
 
   server.closeIdleConnections();
 });

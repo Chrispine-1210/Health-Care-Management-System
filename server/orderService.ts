@@ -56,7 +56,7 @@ export class OrderService {
   static async getOrdersByCustomer(customerId: string) {
     try {
       const storage = getStorage();
-      return await storage.getOrders();
+      return await storage.getAllOrdersForOperations();
     } catch (error) {
       logger.error('Failed to fetch customer orders', { error, customerId });
       throw error;
