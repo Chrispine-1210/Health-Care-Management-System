@@ -27,6 +27,8 @@ npm start
 
 Migrations are forward-only in production. `0000_healthcare_roles.sql` renames legacy enum values without deleting users. Rolling back enum renames after new role values have been written requires a reviewed data migration. `0001_immutable_audit_logs.sql` can be rolled back only by explicitly dropping its trigger and function, which re-enables destructive audit changes.
 
+`0003_healthcare_integrity_constraints.sql` installs foreign keys and numeric checks as `NOT VALID`. PostgreSQL enforces them for new writes while allowing deployment before legacy-data cleanup. Before marking them validated, inventory orphaned references and invalid amounts, remediate them under an approved data-change plan, then run `ALTER TABLE ... VALIDATE CONSTRAINT` individually. The composite unique index requires duplicate order lines to be consolidated before migration execution. Do not drop or truncate rows as an automated remediation.
+
 ## Container
 
 ```bash
