@@ -1,5 +1,5 @@
 import type { IStorage } from "./storage";
-import { InsufficientStockError } from "./storageErrors";
+import { InsufficientStockError, InvalidStockAdjustmentError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
   StockBatch, InsertStockBatch, StockMovement, Order, InsertOrder, OrderItem, InsertOrderItem,
@@ -219,6 +219,65 @@ export class MemoryStorage implements IStorage {
     const order = { id, ...orderData, createdAt: new Date(), updatedAt: new Date() } as Order;
     this.orders.set(id, order);
     return order;
+  }
+
+  async createStockBatchWithAudit(batchData: InsertStockBatch, audit: InsertAuditLog): Promise<StockBatch> {
+    const movementCount = this.stockMovements.length;
+    const batch = await this.createStockBatch(batchData);
+    try {
+      if (batch.quantity > 0) {
+        this.stockMovements.push({
+          id: crypto.randomUUID(), productId: batch.productId, batchId: batch.id, branchId: batch.branchId,
+          orderId: null, movementType: 'receipt', quantityDelta: batch.quantity, balanceAfter: batch.quantity,
+          reason: 'Initial batch receipt', performedBy: audit.userId ?? null, createdAt: new Date(),
+        });
+      }
+      await this.createAuditLog({ ...audit, entityId: audit.entityId ?? batch.id });
+      return batch;
+    } catch (error) {
+      this.stockBatches.delete(batch.id);
+      this.stockMovements.length = movementCount;
+      throw error;
+    }
+  }
+
+  async updateStockBatchWithAudit(id: string, branchId: string, batchData: Partial<InsertStockBatch>, audit: InsertAuditLog): Promise<StockBatch | undefined> {
+    const previous = this.stockBatches.get(id);
+    if (!previous || previous.branchId !== branchId) return undefined;
+    const { quantity: _quantity, branchId: _branchId, ...allowedChanges } = batchData;
+    const updated = { ...previous, ...allowedChanges, updatedAt: new Date() } as StockBatch;
+    this.stockBatches.set(id, updated);
+    try {
+      await this.createAuditLog({ ...audit, entityId: audit.entityId ?? id });
+      return updated;
+    } catch (error) {
+      this.stockBatches.set(id, previous);
+      throw error;
+    }
+  }
+
+  async adjustStockBatchWithAudit(id: string, branchId: string, quantityDelta: number, reason: string, audit: InsertAuditLog): Promise<StockBatch | undefined> {
+    if (!Number.isInteger(quantityDelta) || quantityDelta === 0) throw new InvalidStockAdjustmentError('Quantity delta must be a non-zero integer');
+    const previous = this.stockBatches.get(id);
+    if (!previous || previous.branchId !== branchId) return undefined;
+    const balanceAfter = previous.quantity + quantityDelta;
+    if (balanceAfter < 0) throw new InvalidStockAdjustmentError();
+    const movementCount = this.stockMovements.length;
+    const updated = { ...previous, quantity: balanceAfter, updatedAt: new Date() };
+    this.stockBatches.set(id, updated);
+    this.stockMovements.push({
+      id: crypto.randomUUID(), productId: previous.productId, batchId: id, branchId,
+      orderId: null, movementType: 'adjustment', quantityDelta, balanceAfter, reason,
+      performedBy: audit.userId ?? null, createdAt: new Date(),
+    });
+    try {
+      await this.createAuditLog({ ...audit, entityId: audit.entityId ?? id });
+      return updated;
+    } catch (error) {
+      this.stockBatches.set(id, previous);
+      this.stockMovements.length = movementCount;
+      throw error;
+    }
   }
 
   async getStockMovements(filters: { batchId?: string; branchId?: string } = {}): Promise<StockMovement[]> {

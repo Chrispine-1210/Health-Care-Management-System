@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storageManager";
-import { InsufficientStockError } from "./storageErrors";
+import { InsufficientStockError, InvalidStockAdjustmentError } from "./storageErrors";
 import { authenticateToken, requirePermission } from "./authMiddleware";
 import { canRoleAssign, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
 import { registerAuthRoutes } from "./auth-routes";
@@ -116,8 +116,15 @@ const selfProfileUpdateSchema = z.object({
   licenseNumber: z.string().max(100).nullable().optional(),
 }).strict();
 
-const stockBatchCreateSchema = insertStockBatchSchema.strict();
-const stockBatchUpdateSchema = stockBatchCreateSchema.partial().strict();
+const stockBatchCreateSchema = insertStockBatchSchema.extend({
+  expiryDate: z.coerce.date(),
+  receivedAt: z.coerce.date().nullable().optional(),
+}).strict();
+const stockBatchUpdateSchema = stockBatchCreateSchema.omit({ quantity: true, branchId: true }).partial().strict();
+const stockAdjustmentSchema = z.object({
+  quantityDelta: z.number().int().min(-1000000).max(1000000).refine((value) => value !== 0, 'Quantity delta must not be zero'),
+  reason: z.string().trim().min(10).max(1000),
+}).strict();
 const productCreateSchema = insertProductSchema.strict();
 const productUpdateSchema = productCreateSchema.partial().strict();
 const prescriptionCreateSchema = z.object({
@@ -359,9 +366,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/admin/inventory/batch', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
-      const batch = await getStorage().createStockBatch(stockBatchCreateSchema.parse(req.body));
+      const input = stockBatchCreateSchema.parse(req.body);
+      if (!req.user!.branchId || input.branchId !== req.user!.branchId) return res.status(403).json({ message: 'Cannot receive stock for another branch' });
+      const audit = buildAuditEvent(req, {
+        action: 'stock.received', entityType: 'stock_batch',
+        changes: { productId: input.productId, branchId: input.branchId, batchNumber: input.batchNumber, quantity: input.quantity },
+      });
+      const batch = await getStorage().createStockBatchWithAudit(input, audit);
       res.status(201).json(batch);
     } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid stock batch', errors: error.issues });
       console.error("Error creating stock batch:", error);
       res.status(500).json({ message: "Failed to create stock batch" });
     }
@@ -369,11 +383,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/admin/inventory/batch/:id', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
-      const batch = await getStorage().updateStockBatch(req.params.id, stockBatchUpdateSchema.parse(req.body));
+      if (!req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+      const changes = stockBatchUpdateSchema.parse(req.body);
+      const audit = buildAuditEvent(req, { action: 'stock.batch.update', entityType: 'stock_batch', entityId: req.params.id, changes });
+      const batch = await getStorage().updateStockBatchWithAudit(req.params.id, req.user!.branchId, changes, audit);
+      if (!batch) return res.status(404).json({ message: 'Stock batch not found' });
       res.json(batch);
     } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid stock batch update', errors: error.issues });
       console.error("Error updating stock batch:", error);
       res.status(500).json({ message: "Failed to update stock batch" });
+    }
+  });
+
+  app.post('/api/admin/inventory/batch/:id/adjust', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
+    try {
+      if (!req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+      const { quantityDelta, reason } = stockAdjustmentSchema.parse(req.body);
+      const audit = buildAuditEvent(req, {
+        action: 'stock.adjusted', entityType: 'stock_batch', entityId: req.params.id,
+        changes: { quantityDelta, reason },
+      });
+      const batch = await getStorage().adjustStockBatchWithAudit(req.params.id, req.user!.branchId, quantityDelta, reason, audit);
+      if (!batch) return res.status(404).json({ message: 'Stock batch not found' });
+      res.json(batch);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid stock adjustment', errors: error.issues });
+      if (error instanceof InvalidStockAdjustmentError) return res.status(409).json({ message: error.message });
+      console.error("Error adjusting stock batch:", error);
+      res.status(500).json({ message: "Failed to adjust stock batch" });
     }
   });
 

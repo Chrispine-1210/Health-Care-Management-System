@@ -72,6 +72,53 @@ test('order creation rolls back order and items when its audit insert fails', as
   assert.deepEqual(await storage.getStockMovements({ batchId: batch.id }), []);
 });
 
+test('stock receipt and adjustment roll back when audit insertion fails', async () => {
+  const storage = new FailingAuditStorage();
+  await assert.rejects(
+    storage.createStockBatchWithAudit({
+      productId: 'product-a', branchId: 'branch-a', batchNumber: 'RECEIPT', quantity: 5,
+      expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+    }, audit('stock.received')),
+    /deliberate audit failure/,
+  );
+  assert.deepEqual(await storage.getStockBatchesByProduct('product-a'), []);
+  assert.deepEqual(await storage.getStockMovements(), []);
+
+  const batch = await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'ADJUST', quantity: 5,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+  });
+  await assert.rejects(
+    storage.adjustStockBatchWithAudit(batch.id, 'branch-a', -2, 'Damaged during handling', audit('stock.adjusted')),
+    /deliberate audit failure/,
+  );
+  assert.equal((await storage.getStockBatchesByProduct('product-a'))[0].quantity, 5);
+  assert.deepEqual(await storage.getStockMovements(), []);
+});
+
+test('stock adjustments require branch ownership, preserve nonnegative balances, and append evidence', async () => {
+  const storage = new MemoryStorage();
+  const batch = await storage.createStockBatchWithAudit({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+  }, audit('stock.received'));
+
+  assert.equal(await storage.adjustStockBatchWithAudit(batch.id, 'branch-b', -1, 'Physical count correction', audit('stock.adjusted')), undefined);
+  await assert.rejects(
+    storage.adjustStockBatchWithAudit(batch.id, 'branch-a', -6, 'Physical count correction', audit('stock.adjusted')),
+    /invalid balance/,
+  );
+  const adjusted = await storage.adjustStockBatchWithAudit(batch.id, 'branch-a', -2, 'Physical count correction', audit('stock.adjusted'));
+  assert.equal(adjusted?.quantity, 3);
+  assert.deepEqual((await storage.getStockMovements({ batchId: batch.id }))
+    .map((movement) => [movement.movementType, movement.quantityDelta, movement.balanceAfter] as const)
+    .sort(([left], [right]) => left.localeCompare(right)), [
+    ['adjustment', -2, 3],
+    ['receipt', 5, 5],
+  ]);
+  assert.deepEqual((await storage.getAuditLogs()).map((entry) => entry.action).sort(), ['stock.adjusted', 'stock.received']);
+});
+
 test('order reservation uses FEFO batches and records immutable movement balances', async () => {
   const storage = new MemoryStorage();
   const later = await storage.createStockBatch({

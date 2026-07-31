@@ -4,3 +4,10 @@ export class InsufficientStockError extends Error {
     this.name = 'InsufficientStockError';
   }
 }
+
+export class InvalidStockAdjustmentError extends Error {
+  constructor(message = 'Stock adjustment would produce an invalid balance') {
+    super(message);
+    this.name = 'InvalidStockAdjustmentError';
+  }
+}

@@ -50,7 +50,7 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     status: 'scheduled',
   });
   const pendingPrescription = await storage.createPrescription({ patientId: patientA.userId, status: 'pending' });
-  await storage.createStockBatch({ productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
+  const branchBatch = await storage.createStockBatch({ productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
   await storage.createStockBatch({ productId: 'product-b', branchId: 'branch-b', batchNumber: 'B-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
   await storage.createOrderWithItemsAndAudit(
     { customerId: patientA.userId, branchId: 'branch-a', subtotal: '10', total: '10' },
@@ -103,6 +103,23 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   const branchMovements = await branchStockLedger.json() as Array<{ branchId: string }>;
   assert.equal(branchMovements.length, 1);
   assert.equal(branchMovements[0].branchId, 'branch-a');
+
+  const crossBranchReceipt = await request('/api/admin/inventory/batch', pharmacist.token, {
+    method: 'POST',
+    body: JSON.stringify({ productId: 'product-a', branchId: 'branch-b', batchNumber: 'CROSS', quantity: 5, expiryDate: '2030-01-01T00:00:00.000Z', costPrice: '5' }),
+  });
+  assert.equal(crossBranchReceipt.status, 403);
+
+  const quantityInjection = await request(`/api/admin/inventory/batch/${branchBatch.id}`, pharmacist.token, {
+    method: 'PATCH', body: JSON.stringify({ quantity: 500 }),
+  });
+  assert.equal(quantityInjection.status, 400);
+
+  const adjustment = await request(`/api/admin/inventory/batch/${branchBatch.id}/adjust`, pharmacist.token, {
+    method: 'POST', body: JSON.stringify({ quantityDelta: -1, reason: 'Damaged unit found during physical count' }),
+  });
+  assert.equal(adjustment.status, 200);
+  assert.equal((await storage.getStockBatchesByProduct('product-a')).find((batch) => batch.id === branchBatch.id)?.quantity, 3);
 
   const wrongOwnerPayment = await request('/api/payments/process', patientB.token, {
     method: 'POST',

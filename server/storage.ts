@@ -40,7 +40,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, lt, lte, gte, gt } from "drizzle-orm";
-import { InsufficientStockError } from "./storageErrors";
+import { InsufficientStockError, InvalidStockAdjustmentError } from "./storageErrors";
 
 export interface IStorage {
   // User operations (required for Replit Auth)
@@ -75,6 +75,9 @@ export interface IStorage {
   getExpiringBatches(daysThreshold: number): Promise<StockBatch[]>;
   createStockBatch(batch: InsertStockBatch): Promise<StockBatch>;
   updateStockBatch(id: string, batch: Partial<InsertStockBatch>): Promise<StockBatch>;
+  createStockBatchWithAudit(batch: InsertStockBatch, audit: InsertAuditLog): Promise<StockBatch>;
+  updateStockBatchWithAudit(id: string, branchId: string, batch: Partial<InsertStockBatch>, audit: InsertAuditLog): Promise<StockBatch | undefined>;
+  adjustStockBatchWithAudit(id: string, branchId: string, quantityDelta: number, reason: string, audit: InsertAuditLog): Promise<StockBatch | undefined>;
   getStockMovements(filters?: { batchId?: string; branchId?: string }): Promise<StockMovement[]>;
 
   // Order operations
@@ -331,6 +334,66 @@ export class DatabaseStorage implements IStorage {
   async createOrder(orderData: InsertOrder): Promise<Order> {
     const [order] = await db.insert(orders).values(orderData).returning();
     return order;
+  }
+
+  async createStockBatchWithAudit(batchData: InsertStockBatch, audit: InsertAuditLog): Promise<StockBatch> {
+    return db.transaction(async (tx) => {
+      const [batch] = await tx.insert(stockBatches).values(batchData).returning();
+      if (batch.quantity > 0) {
+        await tx.insert(stockMovements).values({
+          productId: batch.productId,
+          batchId: batch.id,
+          branchId: batch.branchId,
+          movementType: 'receipt',
+          quantityDelta: batch.quantity,
+          balanceAfter: batch.quantity,
+          reason: 'Initial batch receipt',
+          performedBy: audit.userId,
+        });
+      }
+      await tx.insert(auditLogs).values({ ...audit, entityId: audit.entityId ?? batch.id });
+      return batch;
+    });
+  }
+
+  async updateStockBatchWithAudit(id: string, branchId: string, batchData: Partial<InsertStockBatch>, audit: InsertAuditLog): Promise<StockBatch | undefined> {
+    return db.transaction(async (tx) => {
+      const { quantity: _quantity, branchId: _branchId, ...allowedChanges } = batchData;
+      const [batch] = await tx.update(stockBatches)
+        .set({ ...allowedChanges, updatedAt: new Date() })
+        .where(and(eq(stockBatches.id, id), eq(stockBatches.branchId, branchId)))
+        .returning();
+      if (!batch) return undefined;
+      await tx.insert(auditLogs).values({ ...audit, entityId: audit.entityId ?? batch.id });
+      return batch;
+    });
+  }
+
+  async adjustStockBatchWithAudit(id: string, branchId: string, quantityDelta: number, reason: string, audit: InsertAuditLog): Promise<StockBatch | undefined> {
+    if (!Number.isInteger(quantityDelta) || quantityDelta === 0) throw new InvalidStockAdjustmentError('Quantity delta must be a non-zero integer');
+    return db.transaction(async (tx) => {
+      const [current] = await tx.select().from(stockBatches).where(and(eq(stockBatches.id, id), eq(stockBatches.branchId, branchId)));
+      if (!current) return undefined;
+      if (current.quantity + quantityDelta < 0) throw new InvalidStockAdjustmentError();
+      const balanceCondition = quantityDelta < 0 ? gte(stockBatches.quantity, Math.abs(quantityDelta)) : undefined;
+      const [batch] = await tx.update(stockBatches)
+        .set({ quantity: sql`${stockBatches.quantity} + ${quantityDelta}`, updatedAt: new Date() })
+        .where(and(eq(stockBatches.id, id), eq(stockBatches.branchId, branchId), balanceCondition))
+        .returning();
+      if (!batch) throw new InvalidStockAdjustmentError('Concurrent stock change prevented this adjustment');
+      await tx.insert(stockMovements).values({
+        productId: batch.productId,
+        batchId: batch.id,
+        branchId: batch.branchId,
+        movementType: 'adjustment',
+        quantityDelta,
+        balanceAfter: batch.quantity,
+        reason,
+        performedBy: audit.userId,
+      });
+      await tx.insert(auditLogs).values({ ...audit, entityId: audit.entityId ?? batch.id });
+      return batch;
+    });
   }
 
   async getStockMovements(filters: { batchId?: string; branchId?: string } = {}): Promise<StockMovement[]> {
