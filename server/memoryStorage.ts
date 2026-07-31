@@ -246,6 +246,18 @@ export class MemoryStorage implements IStorage {
     return { order, items };
   }
 
+  async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
+    const created = await this.createOrderWithItems(orderData, itemData);
+    try {
+      await this.createAuditLog({ ...audit, entityId: audit.entityId ?? created.order.id });
+      return created;
+    } catch (error) {
+      this.orders.delete(created.order.id);
+      this.orderItems.delete(created.order.id);
+      throw error;
+    }
+  }
+
   async updateOrder(id: string, orderData: Partial<InsertOrder>): Promise<Order> {
     const order = this.orders.get(id);
     if (!order) throw new Error("Order not found");

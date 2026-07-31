@@ -82,6 +82,7 @@ export interface IStorage {
   getOrdersByBranch(branchId: string): Promise<Order[]>;
   createOrder(order: InsertOrder): Promise<Order>;
   createOrderWithItems(order: InsertOrder, items: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }>;
+  createOrderWithItemsAndAudit(order: InsertOrder, items: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }>;
   updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order>;
   updateOrderWithAudit(id: string, order: Partial<InsertOrder>, audit: InsertAuditLog): Promise<Order>;
 
@@ -142,55 +143,23 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   // User operations
   async getUser(id: string): Promise<User | undefined> {
-    try {
-      const [user] = await db.select().from(users).where(eq(users.id, id));
-      return user;
-    } catch (error: any) {
-      if (error.code === 'XX000' || error.message?.includes('disabled')) {
-        console.warn("Database endpoint disabled, falling back to memory");
-        return undefined;
-      }
-      throw error;
-    }
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    try {
-      const [user] = await db
-        .insert(users)
-        .values(userData)
-        .onConflictDoUpdate({
-          target: users.id,
-          set: {
-            ...userData,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
-      return user;
-    } catch (error: any) {
-      if (error.code === 'XX000' || error.message?.includes('disabled')) {
-        console.warn("Database endpoint disabled, falling back to memory");
-        return {
-          id: userData.id ?? crypto.randomUUID(),
-          email: userData.email ?? null,
-          firstName: userData.firstName ?? null,
-          lastName: userData.lastName ?? null,
-          profileImageUrl: userData.profileImageUrl ?? null,
-          phone: userData.phone ?? null,
-          role: 'patient',
-          accountStatus: 'active',
-          branchId: userData.branchId ?? null,
-          allergies: [],
-          chronicConditions: [],
-          vehicleInfo: null,
-          licenseNumber: null,
-          createdAt: new Date(),
+    const [user] = await db
+      .insert(users)
+      .values(userData)
+      .onConflictDoUpdate({
+        target: users.id,
+        set: {
+          ...userData,
           updatedAt: new Date(),
-        };
-      }
-      throw error;
-    }
+        },
+      })
+      .returning();
+    return user;
   }
 
   async getUsersByRole(role: string): Promise<User[]> {
@@ -384,6 +353,17 @@ export class DatabaseStorage implements IStorage {
       const createdItems = itemData.length
         ? await tx.insert(orderItems).values(itemData.map((item) => ({ ...item, orderId: order.id }))).returning()
         : [];
+      return { order, items: createdItems };
+    });
+  }
+
+  async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
+    return db.transaction(async (tx) => {
+      const [order] = await tx.insert(orders).values(orderData).returning();
+      const createdItems = itemData.length
+        ? await tx.insert(orderItems).values(itemData.map((item) => ({ ...item, orderId: order.id }))).returning()
+        : [];
+      await tx.insert(auditLogs).values({ ...audit, entityId: audit.entityId ?? order.id });
       return { order, items: createdItems };
     });
   }

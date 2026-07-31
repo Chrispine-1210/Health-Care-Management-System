@@ -53,6 +53,19 @@ test('payment-state update rolls back when its audit insert fails', async () => 
   assert.equal((await storage.getOrder(order.id))?.paymentStatus, 'pending');
 });
 
+test('order creation rolls back order and items when its audit insert fails', async () => {
+  const storage = new FailingAuditStorage();
+  await assert.rejects(
+    storage.createOrderWithItemsAndAudit(
+      { customerId: 'patient-a', branchId: 'branch-a', subtotal: '10', total: '10' },
+      [{ productId: 'product-a', quantity: 1, unitPrice: '10', subtotal: '10' }],
+      audit('order.created'),
+    ),
+    /deliberate audit failure/,
+  );
+  assert.deepEqual(await storage.getOrdersByCustomer('patient-a'), []);
+});
+
 test('emergency-access activation fails when its audit insert fails', async () => {
   const storage = new FailingAuditStorage();
   await assert.rejects(
@@ -135,8 +148,15 @@ test('successful transactional mutations append audit entries', async () => {
   const storage = new MemoryStorage();
   await storage.upsertUser({ id: 'user-a', role: 'patient' });
   const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending' });
+  const createdOrder = await storage.createOrderWithItemsAndAudit(
+    { customerId: 'patient-a', branchId: 'branch-a', subtotal: '10', total: '10' },
+    [{ productId: 'product-a', quantity: 1, unitPrice: '10', subtotal: '10' }],
+    audit('order.created'),
+  );
   await storage.assignUserRoleWithAudit('user-a', 'receptionist', 'branch-a', audit('user.role.change'));
   await storage.reviewPrescriptionWithAudit(prescription.id, 'pending', { status: 'approved' }, audit('prescription.review'));
   const logs = await storage.getAuditLogs();
-  assert.deepEqual(logs.map((entry) => entry.action).sort(), ['prescription.review', 'user.role.change']);
+  assert.equal((await storage.getOrderItems(createdOrder.order.id)).length, 1);
+  assert.equal(logs.find((entry) => entry.action === 'order.created')?.entityId, createdOrder.order.id);
+  assert.deepEqual(logs.map((entry) => entry.action).sort(), ['order.created', 'prescription.review', 'user.role.change']);
 });

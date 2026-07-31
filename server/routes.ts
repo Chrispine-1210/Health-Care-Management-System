@@ -639,7 +639,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const total = subtotal + deliveryCharge;
       
       // Create order
-      const { order, items: createdItems } = await getStorage().createOrderWithItems({
+      const audit = buildAuditEvent(req, {
+        action: 'order.created',
+        entityType: 'order',
+        changes: {
+          branchId: branchId || 'default-branch-id',
+          itemCount: orderLineItems.length,
+          subtotal: subtotal.toString(),
+          deliveryCharge: deliveryCharge.toString(),
+          total: total.toString(),
+          deliveryRequired: Boolean(deliveryAddress),
+          paymentMethod: paymentMethod || 'cash',
+        },
+      });
+      const { order, items: createdItems } = await getStorage().createOrderWithItemsAndAudit({
         customerId: userId,
         branchId: branchId || 'default-branch-id',
         subtotal: subtotal.toString(),
@@ -653,7 +666,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paymentMethod: paymentMethod || 'cash',
         status: 'pending',
         paymentStatus: 'pending',
-      }, orderLineItems);
+      }, orderLineItems, audit);
       
       res.status(201).json({ ...order, items: createdItems });
     } catch (error) {
