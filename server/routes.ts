@@ -30,11 +30,11 @@ import {
   canUpdateOrder,
 } from "./authorization";
 
-function canReadPatientFromRequest(req: { user?: { id: string; role: string }; headers: Record<string, unknown> }, patientId: string): boolean {
+async function canReadPatientFromRequest(req: { user?: { id: string; role: string }; headers: Record<string, unknown> }, patientId: string): Promise<boolean> {
   if (!req.user) return false;
   if (canReadPatientData(req.user, patientId)) return true;
   const grantId = typeof req.headers['x-emergency-access-id'] === 'string' ? req.headers['x-emergency-access-id'] : '';
-  const grant = breakGlassService.getValidGrant(grantId, req.user.id, patientId);
+  const grant = await breakGlassService.getValidGrant(grantId, req.user.id, patientId);
   return Boolean(grant && canReadPatientRecord(req.user, {
     patientId,
     emergencyAccess: { active: true, expiresAt: grant.expiresAt, reason: grant.justification, elevatedAuth: true },
@@ -459,7 +459,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/prescriptions/patient/:patientId', authenticateToken, async (req, res) => {
     try {
-      if (!canReadPatientFromRequest(req, req.params.patientId)) {
+      if (!await canReadPatientFromRequest(req, req.params.patientId)) {
         return res.status(403).json({ message: 'Cannot access another patient prescription history' });
       }
       const prescriptions = await getStorage().getPrescriptionsByPatient(req.params.patientId);
@@ -478,7 +478,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!prescription) {
         return res.status(404).json({ message: "Prescription not found" });
       }
-      if (!canReadPatientFromRequest(req, prescription.patientId)) {
+      if (!await canReadPatientFromRequest(req, prescription.patientId)) {
         return res.status(403).json({ message: 'Cannot access another patient prescription' });
       }
       res.json(prescription);
@@ -828,7 +828,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/appointments/patient/:patientId', authenticateToken, async (req, res) => {
     try {
-      if (!canReadPatientFromRequest(req, req.params.patientId)) {
+      if (!await canReadPatientFromRequest(req, req.params.patientId)) {
         return res.status(403).json({ message: "Cannot access another patient's appointments" });
       }
       const appointments = await getStorage().getAppointmentsByPatient(req.params.patientId);
@@ -1014,14 +1014,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await recordAuditEvent(req, { action: 'emergency_access.denied', entityType: 'patient', entityId: payload.patientId, changes: { reasonCode: payload.reasonCode, outcome: 'denied' } });
         return res.status(403).json({ message: 'Forbidden' });
       }
-      const grant = breakGlassService.activate({
+      const grant = await breakGlassService.activateWithAudit({
         actorId: req.user!.id,
         patientId: payload.patientId,
         reasonCode: payload.reasonCode,
         justification: payload.justification,
         durationMinutes: payload.durationMinutes,
-      });
-      await recordAuditEvent(req, { action: 'emergency_access.activated', entityType: 'patient', entityId: payload.patientId, changes: { grantId: grant.id, reasonCode: grant.reasonCode, expiresAt: grant.expiresAt, outcome: 'success' } });
+      }, buildAuditEvent(req, {
+        action: 'emergency_access.activated',
+        entityType: 'patient',
+        entityId: payload.patientId,
+        changes: { reasonCode: payload.reasonCode, durationMinutes: payload.durationMinutes, outcome: 'success' },
+      }));
       await notificationService.enqueue({
         eventType: 'security.emergency_access',
         channels: [],
@@ -1039,9 +1043,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/emergency-access/:id/review', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), async (req, res) => {
     try {
       const payload = breakGlassReviewSchema.parse(req.body);
-      const grant = breakGlassService.review(req.params.id, req.user!.id, payload.state, payload.notes);
+      const grant = await breakGlassService.reviewWithAudit(
+        req.params.id,
+        req.user!.id,
+        payload.state,
+        payload.notes,
+        buildAuditEvent(req, { action: `emergency_access.${payload.state}`, entityType: 'emergency_access', entityId: req.params.id, changes: { outcome: 'success' } }),
+      );
       if (!grant) return res.status(404).json({ message: 'Emergency access grant not found' });
-      await recordAuditEvent(req, { action: `emergency_access.${payload.state}`, entityType: 'emergency_access', entityId: grant.id, changes: { outcome: 'success' } });
       res.json({ id: grant.id, reviewState: grant.reviewState, reviewedAt: grant.reviewedAt });
     } catch (error) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid request body' });
@@ -1071,7 +1080,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!appointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
-      if (!canReadPatientFromRequest(req, appointment.patientId)) {
+      if (!await canReadPatientFromRequest(req, appointment.patientId)) {
         return res.status(403).json({ message: "Cannot access this appointment" });
       }
       res.json(appointment);

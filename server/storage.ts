@@ -10,6 +10,7 @@ import {
   appointments,
   contentItems,
   auditLogs,
+  emergencyAccessGrants,
   type User,
   type UpsertUser,
   type Branch,
@@ -32,6 +33,8 @@ import {
   type InsertContentItem,
   type AuditLog,
   type InsertAuditLog,
+  type EmergencyAccessGrant,
+  type InsertEmergencyAccessGrant,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, lt, lte, gte } from "drizzle-orm";
@@ -123,6 +126,12 @@ export interface IStorage {
   // Audit Log operations
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(limit?: number): Promise<AuditLog[]>;
+
+  createEmergencyAccessGrant(grant: InsertEmergencyAccessGrant): Promise<EmergencyAccessGrant>;
+  createEmergencyAccessGrantWithAudit(grant: InsertEmergencyAccessGrant, audit: InsertAuditLog): Promise<EmergencyAccessGrant>;
+  getEmergencyAccessGrant(id: string): Promise<EmergencyAccessGrant | undefined>;
+  reviewEmergencyAccessGrant(id: string, changes: Partial<InsertEmergencyAccessGrant>): Promise<EmergencyAccessGrant | undefined>;
+  reviewEmergencyAccessGrantWithAudit(id: string, changes: Partial<InsertEmergencyAccessGrant>, audit: InsertAuditLog): Promise<EmergencyAccessGrant | undefined>;
 
   // Analytics/Stats
   getDashboardStats(): Promise<any>;
@@ -571,6 +580,45 @@ export class DatabaseStorage implements IStorage {
 
   async getAuditLogs(limit: number = 100): Promise<AuditLog[]> {
     return await db.select().from(auditLogs).orderBy(desc(auditLogs.timestamp)).limit(limit);
+  }
+
+  async createEmergencyAccessGrant(grant: InsertEmergencyAccessGrant): Promise<EmergencyAccessGrant> {
+    const [created] = await db.insert(emergencyAccessGrants).values(grant).returning();
+    return created;
+  }
+
+  async createEmergencyAccessGrantWithAudit(grant: InsertEmergencyAccessGrant, audit: InsertAuditLog): Promise<EmergencyAccessGrant> {
+    return db.transaction(async (tx) => {
+      const [created] = await tx.insert(emergencyAccessGrants).values(grant).returning();
+      await tx.insert(auditLogs).values(audit);
+      return created;
+    });
+  }
+
+  async getEmergencyAccessGrant(id: string): Promise<EmergencyAccessGrant | undefined> {
+    if (!id) return undefined;
+    const [grant] = await db.select().from(emergencyAccessGrants).where(eq(emergencyAccessGrants.id, id));
+    return grant;
+  }
+
+  async reviewEmergencyAccessGrant(id: string, changes: Partial<InsertEmergencyAccessGrant>): Promise<EmergencyAccessGrant | undefined> {
+    const [updated] = await db.update(emergencyAccessGrants)
+      .set(changes)
+      .where(and(eq(emergencyAccessGrants.id, id), eq(emergencyAccessGrants.reviewState, 'pending')))
+      .returning();
+    return updated;
+  }
+
+  async reviewEmergencyAccessGrantWithAudit(id: string, changes: Partial<InsertEmergencyAccessGrant>, audit: InsertAuditLog): Promise<EmergencyAccessGrant | undefined> {
+    return db.transaction(async (tx) => {
+      const [updated] = await tx.update(emergencyAccessGrants)
+        .set(changes)
+        .where(and(eq(emergencyAccessGrants.id, id), eq(emergencyAccessGrants.reviewState, 'pending')))
+        .returning();
+      if (!updated) return undefined;
+      await tx.insert(auditLogs).values(audit);
+      return updated;
+    });
   }
 
   // Analytics/Stats

@@ -44,4 +44,4 @@ Run `npm run db:migrate` as a one-off release command before replacing applicati
 - `/ready` returns 503 when required configuration is absent or the configured database is unreachable.
 - `SIGTERM` and `SIGINT` stop accepting requests, close the HTTP server and drain the database pool.
 - Back up and test restore procedures before applying migrations.
-- Emergency-access grants are currently process-local and are not suitable for multiple replicas; persistent grant storage remains required before production use.
+- Emergency-access grants are persisted in PostgreSQL by migration `0004_persist_emergency_access.sql`; activation and review are committed atomically with their audit records.

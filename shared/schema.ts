@@ -32,6 +32,8 @@ export const userRoleEnum = pgEnum('user_role', [
   'super_administrator',
 ]);
 export const accountStatusEnum = pgEnum('account_status', ['active', 'disabled', 'locked']);
+export const emergencyReasonEnum = pgEnum('emergency_reason', ['immediate_threat', 'continuity_of_care', 'system_outage']);
+export const emergencyReviewStateEnum = pgEnum('emergency_review_state', ['pending', 'approved', 'rejected', 'closed']);
 export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed']);
 export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'processing', 'completed', 'failed', 'refunded']);
@@ -514,3 +516,25 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+
+export const emergencyAccessGrants = pgTable("emergency_access_grants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  actorId: varchar("actor_id").notNull(),
+  patientId: varchar("patient_id").notNull(),
+  reasonCode: emergencyReasonEnum("reason_code").notNull(),
+  justification: text("justification").notNull(),
+  activatedAt: timestamp("activated_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  reviewState: emergencyReviewStateEnum("review_state").default('pending').notNull(),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+}, (table) => [
+  index("idx_emergency_access_actor_patient").on(table.actorId, table.patientId),
+  index("idx_emergency_access_expiry").on(table.expiresAt),
+  index("idx_emergency_access_review").on(table.reviewState),
+]);
+
+export const insertEmergencyAccessGrantSchema = createInsertSchema(emergencyAccessGrants).omit({ id: true });
+export type EmergencyAccessGrant = typeof emergencyAccessGrants.$inferSelect;
+export type InsertEmergencyAccessGrant = z.infer<typeof insertEmergencyAccessGrantSchema>;

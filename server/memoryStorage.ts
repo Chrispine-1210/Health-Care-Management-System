@@ -4,7 +4,7 @@ import type {
   StockBatch, InsertStockBatch, Order, InsertOrder, OrderItem, InsertOrderItem,
   Prescription, InsertPrescription, Delivery, InsertDelivery,
   Appointment, InsertAppointment, ContentItem, InsertContentItem,
-  AuditLog, InsertAuditLog
+  AuditLog, InsertAuditLog, EmergencyAccessGrant, InsertEmergencyAccessGrant
 } from "@shared/schema";
 
 export class MemoryStorage implements IStorage {
@@ -19,6 +19,7 @@ export class MemoryStorage implements IStorage {
   private appointments = new Map<string, Appointment>();
   private contentItems = new Map<string, ContentItem>();
   private auditLogs: AuditLog[] = [];
+  private emergencyAccessGrants = new Map<string, EmergencyAccessGrant>();
 
   // Users
   async getUser(id: string): Promise<User | undefined> {
@@ -448,6 +449,49 @@ export class MemoryStorage implements IStorage {
   async getAuditLogs(limit?: number): Promise<AuditLog[]> {
     const logs = this.auditLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     return limit ? logs.slice(0, limit) : logs;
+  }
+
+  async createEmergencyAccessGrant(grant: InsertEmergencyAccessGrant): Promise<EmergencyAccessGrant> {
+    const created = { id: crypto.randomUUID(), reviewState: 'pending', ...grant } as EmergencyAccessGrant;
+    this.emergencyAccessGrants.set(created.id, created);
+    return created;
+  }
+
+  async createEmergencyAccessGrantWithAudit(grant: InsertEmergencyAccessGrant, audit: InsertAuditLog): Promise<EmergencyAccessGrant> {
+    const created = await this.createEmergencyAccessGrant(grant);
+    try {
+      await this.createAuditLog(audit);
+      return created;
+    } catch (error) {
+      this.emergencyAccessGrants.delete(created.id);
+      throw error;
+    }
+  }
+
+  async getEmergencyAccessGrant(id: string): Promise<EmergencyAccessGrant | undefined> {
+    if (!id) return undefined;
+    return this.emergencyAccessGrants.get(id);
+  }
+
+  async reviewEmergencyAccessGrant(id: string, changes: Partial<InsertEmergencyAccessGrant>): Promise<EmergencyAccessGrant | undefined> {
+    const grant = this.emergencyAccessGrants.get(id);
+    if (!grant || grant.reviewState !== 'pending') return undefined;
+    const updated = { ...grant, ...changes } as EmergencyAccessGrant;
+    this.emergencyAccessGrants.set(id, updated);
+    return updated;
+  }
+
+  async reviewEmergencyAccessGrantWithAudit(id: string, changes: Partial<InsertEmergencyAccessGrant>, audit: InsertAuditLog): Promise<EmergencyAccessGrant | undefined> {
+    const previous = this.emergencyAccessGrants.get(id);
+    const updated = await this.reviewEmergencyAccessGrant(id, changes);
+    if (!updated) return undefined;
+    try {
+      await this.createAuditLog(audit);
+      return updated;
+    } catch (error) {
+      if (previous) this.emergencyAccessGrants.set(id, previous);
+      throw error;
+    }
   }
 
   async getDashboardStats(): Promise<any> {

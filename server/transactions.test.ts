@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { InsertAuditLog } from '@shared/schema';
+import type { EmergencyAccessGrant, InsertAuditLog, InsertEmergencyAccessGrant } from '@shared/schema';
 import { MemoryStorage } from './memoryStorage';
 
 class FailingAuditStorage extends MemoryStorage {
+  lastCreatedGrantId?: string;
+
   override async createAuditLog(_log: InsertAuditLog): Promise<never> {
     throw new Error('deliberate audit failure');
+  }
+
+  override async createEmergencyAccessGrant(grant: InsertEmergencyAccessGrant): Promise<EmergencyAccessGrant> {
+    const created = await super.createEmergencyAccessGrant(grant);
+    this.lastCreatedGrantId = created.id;
+    return created;
   }
 }
 
@@ -43,6 +51,47 @@ test('payment-state update rolls back when its audit insert fails', async () => 
     /deliberate audit failure/,
   );
   assert.equal((await storage.getOrder(order.id))?.paymentStatus, 'pending');
+});
+
+test('emergency-access activation fails when its audit insert fails', async () => {
+  const storage = new FailingAuditStorage();
+  await assert.rejects(
+    storage.createEmergencyAccessGrantWithAudit({
+      actorId: 'doctor-a',
+      patientId: 'patient-a',
+      reasonCode: 'immediate_threat',
+      justification: 'Immediate intervention is required for the patient.',
+      activatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      expiresAt: new Date('2026-01-01T00:05:00.000Z'),
+      reviewState: 'pending',
+    }, audit('emergency_access.activated')),
+    /deliberate audit failure/,
+  );
+  assert.ok(storage.lastCreatedGrantId);
+  assert.equal(await storage.getEmergencyAccessGrant(storage.lastCreatedGrantId), undefined);
+});
+
+test('emergency-access review rolls back when its audit insert fails', async () => {
+  const storage = new FailingAuditStorage();
+  const grant = await storage.createEmergencyAccessGrant({
+    actorId: 'doctor-a',
+    patientId: 'patient-a',
+    reasonCode: 'continuity_of_care',
+    justification: 'Urgent continuity of care requires temporary access.',
+    activatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    expiresAt: new Date('2026-01-01T00:15:00.000Z'),
+    reviewState: 'pending',
+  });
+  await assert.rejects(
+    storage.reviewEmergencyAccessGrantWithAudit(grant.id, {
+      reviewState: 'rejected',
+      reviewedBy: 'security-admin',
+      reviewedAt: new Date('2026-01-01T00:01:00.000Z'),
+      reviewNotes: 'The incident record did not justify access.',
+    }, audit('emergency_access.rejected')),
+    /deliberate audit failure/,
+  );
+  assert.equal((await storage.getEmergencyAccessGrant(grant.id))?.reviewState, 'pending');
 });
 
 test('successful transactional mutations append audit entries', async () => {
