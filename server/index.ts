@@ -1,5 +1,5 @@
 // server/index.ts
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
@@ -7,6 +7,7 @@ import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
 import { pool } from "./db";
 import { validateProductionEnvironment } from "./config";
+import { globalErrorHandler, notFoundHandler } from "./errorHandler";
 
 validateProductionEnvironment();
 
@@ -68,20 +69,15 @@ app.use((req, res, next) => {
   inventoryIntelligenceService.startDailyScheduler();
   const server = await registerRoutes(app);
 
-  // GLOBAL ERROR HANDLER
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
-    throw err;
-  });
-
   // Vite dev server or production static
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
+
+  app.use(notFoundHandler);
+  app.use(globalErrorHandler);
 
   // START SERVER
   const port = parseInt(process.env.PORT || "5000", 10);

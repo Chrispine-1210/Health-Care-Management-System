@@ -5,7 +5,6 @@ import { authenticateToken, requirePermission } from "./authMiddleware";
 import { canRoleAssign, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
 import { registerAuthRoutes } from "./auth-routes";
 import { logger } from "./logger";
-import { globalErrorHandler, notFoundHandler, asyncHandler, AppError } from "./errorHandler";
 import { validateInput, loginSchema, signupSchema } from "./validation";
 import { userService } from "./userService";
 import { setupAPIDocsRoute } from "./apiDocs";
@@ -1337,12 +1336,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // API Documentation
   setupAPIDocsRoute(app);
-
-  // 404 handler MUST come before error handler
-  app.use(notFoundHandler);
-  
-  // Error handling middleware (must be last)
-  app.use(globalErrorHandler);
 
   const httpServer = createServer(app);
   return httpServer;
