@@ -5,6 +5,7 @@ import express from 'express';
 test('registered routes enforce authentication, permissions, ownership, and non-disclosure', async (t) => {
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'route-authorization-test-secret-at-least-32-characters';
+  process.env.PATIENT_DATA_ENCRYPTION_KEY = 'route-test-encryption-key-at-least-32-characters';
   process.env.DATABASE_URL = 'postgresql://test:test@127.0.0.1:1/test';
   const [{ authService }, { MemoryStorage }, { registerRoutes }, { setStorageForTesting }] = await Promise.all([
     import('./authSystem'),
@@ -73,6 +74,39 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(sameBranchOrder.status, 200);
   const wrongBranchOrder = await request(`/api/orders/${orderB.id}`, branchAdministrator.token);
   assert.equal(wrongBranchOrder.status, 404);
+
+  const wrongOwnerPayment = await request('/api/payments/process', patientB.token, {
+    method: 'POST',
+    body: JSON.stringify({ orderId: orderA.id, method: 'tnm_mpamba', phoneNumber: '0999123456' }),
+  });
+  assert.equal(wrongOwnerPayment.status, 404);
+
+  const paymentFieldInjection = await request('/api/payments/process', patientA.token, {
+    method: 'POST',
+    body: JSON.stringify({ orderId: orderA.id, method: 'tnm_mpamba', phoneNumber: '0999123456', paymentStatus: 'completed' }),
+  });
+  assert.equal(paymentFieldInjection.status, 400);
+  assert.equal((await storage.getOrder(orderA.id))?.paymentStatus, 'pending');
+
+  const payment = await request('/api/payments/process', patientA.token, {
+    method: 'POST',
+    body: JSON.stringify({ orderId: orderA.id, method: 'tnm_mpamba', phoneNumber: '0999123456' }),
+  });
+  assert.equal(payment.status, 200);
+  const paymentBody = await payment.json() as { transactionId: string };
+  assert.ok(paymentBody.transactionId);
+  assert.equal((await storage.getOrder(orderA.id))?.paymentStatus, 'processing');
+
+  const repeatedPayment = await request('/api/payments/process', patientA.token, {
+    method: 'POST',
+    body: JSON.stringify({ orderId: orderA.id, method: 'tnm_mpamba', phoneNumber: '0999123456' }),
+  });
+  assert.equal(repeatedPayment.status, 409);
+
+  const otherPaymentStatus = await request(`/api/payments/check/${paymentBody.transactionId}`, patientB.token, { method: 'POST' });
+  assert.equal(otherPaymentStatus.status, 404);
+  const ownerPaymentStatus = await request(`/api/payments/check/${paymentBody.transactionId}`, patientA.token, { method: 'POST' });
+  assert.equal(ownerPaymentStatus.status, 200);
 
   const adminClinicalRead = await request('/api/prescriptions/patient/unknown-patient', administrator.token);
   assert.equal(adminClinicalRead.status, 403);

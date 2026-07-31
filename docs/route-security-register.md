@@ -18,73 +18,73 @@ Routes inventoried: 82
 | POST | `/api/documents/prescription-letter` | Yes | PRESCRIPTION_READ | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/email-routes.ts:103` |
 | POST | `/api/documents/invoice` | Yes | ORDER_MANAGE | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/email-routes.ts:120` |
 | POST | `/api/documents/delivery-note` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/email-routes.ts:146` |
-| GET | `/health` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:151` |
-| GET | `/ready` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:152` |
-| GET | `/api/health` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:153` |
-| GET | `/api/ready` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:154` |
-| GET | `/api/auth/user` | Yes | CONTEXTUAL_POLICY | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:166` |
-| PATCH | `/api/orders/:id/approve` | Yes | ORDER_MANAGE | Owner or scoped permission | Actor/resource branch where applicable | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:191` |
-| PATCH | `/api/orders/:id/reject` | Yes | ORDER_MANAGE | Owner or scoped permission | Actor/resource branch where applicable | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:202` |
-| GET | `/api/staff/approvals` | Yes | ORDER_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:213` |
-| GET | `/api/staff/members` | Yes | STAFF_MANAGE_BRANCH | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:230` |
-| GET | `/api/staff/support-tickets` | Yes | NOTIFICATION_SEND | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:240` |
-| GET | `/api/admin/stats` | Yes | REPORT_VIEW | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:251` |
-| GET | `/api/admin/inventory` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:261` |
-| GET | `/api/admin/branches` | Yes | BRANCH_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:279` |
-| GET | `/api/admin/users` | Yes | STAFF_MANAGE_SYSTEM | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:289` |
-| PATCH | `/api/admin/users/:id/role` | Yes | STAFF_MANAGE_SYSTEM | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:309` |
-| POST | `/api/admin/inventory/batch` | Yes | INVENTORY_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:330` |
-| PATCH | `/api/admin/inventory/batch/:id` | Yes | INVENTORY_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:340` |
-| GET | `/api/inventory/low-stock` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:350` |
-| GET | `/api/inventory/expiring` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:361` |
-| GET | `/api/products/categories` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:376` |
-| GET | `/api/products` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:387` |
-| GET | `/api/products/featured` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:397` |
-| GET | `/api/products/:id` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:407` |
-| POST | `/api/admin/products` | Yes | PRODUCT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:420` |
-| PATCH | `/api/admin/products/:id` | Yes | PRODUCT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:430` |
-| GET | `/api/prescriptions/pending` | Yes | PRESCRIPTION_DISPENSE | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:444` |
-| GET | `/api/prescriptions/patient/:patientId` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:454` |
-| GET | `/api/prescriptions/:id` | Yes | CONTEXTUAL_POLICY | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:467` |
-| POST | `/api/prescriptions` | Yes | CONTEXTUAL_POLICY | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:485` |
-| PATCH | `/api/prescriptions/:id/review` | Yes | PRESCRIPTION_DISPENSE | - | - | Clinical assignment or approved workflow | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:503` |
-| GET | `/api/orders` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:539` |
-| GET | `/api/orders/:id` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:558` |
-| POST | `/api/orders` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:578` |
-| PATCH | `/api/orders/:id` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:632` |
-| GET | `/api/drivers/active` | Yes | CONTEXTUAL_POLICY | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:651` |
-| GET | `/api/driver/deliveries/active` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:672` |
-| GET | `/api/deliveries` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:694` |
-| PATCH | `/api/deliveries/:id/status` | Yes | DELIVERY_MANAGE | - | - | Assigned driver | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:704` |
-| POST | `/api/deliveries` | Yes | ORDER_MANAGE | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:740` |
-| POST | `/api/payments/process` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:750` |
-| POST | `/api/payments/check/:transactionId` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:787` |
-| GET | `/api/payments/operators/:phoneNumber` | No | PUBLIC | Owner or scoped permission | - | - | Validated state transition | - | Policy; handler coverage pending | `server/routes.ts:799` |
-| GET | `/api/appointments/patient/:patientId` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:815` |
-| POST | `/api/appointments` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:828` |
-| PATCH | `/api/users/:id` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:852` |
-| GET | `/api/branches` | No | PUBLIC | - | Actor/resource branch where applicable | - | - | - | Policy; handler coverage pending | `server/routes.ts:878` |
-| GET | `/api/branches/:id` | No | PUBLIC | - | Actor/resource branch where applicable | - | - | - | Policy; handler coverage pending | `server/routes.ts:888` |
-| GET | `/api/admin/audit-logs` | Yes | AUDIT_LOG_VIEW | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:901` |
-| POST | `/api/admin/branches` | Yes | BRANCH_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:911` |
-| PATCH | `/api/admin/branches/:id` | Yes | BRANCH_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:921` |
-| GET | `/api/content` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:935` |
-| GET | `/api/content/:slug` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:946` |
-| POST | `/api/admin/content` | Yes | CONTENT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:959` |
-| PATCH | `/api/admin/content/:id` | Yes | CONTENT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:970` |
-| GET | `/api/audit-logs` | Yes | AUDIT_LOG_VIEW | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:984` |
-| POST | `/api/emergency-access` | Yes | PATIENT_PROFILE_READ | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:995` |
-| PATCH | `/api/emergency-access/:id/review` | Yes | AUDIT_LOG_VIEW | - | - | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1024` |
-| GET | `/api/appointments` | Yes | APPOINTMENT_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1041` |
-| GET | `/api/appointments/:id` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1051` |
-| PATCH | `/api/appointments/:id` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1069` |
-| GET | `/api/driver/deliveries/history` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1091` |
-| GET | `/api/staff/stats` | Yes | REPORT_VIEW | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1113` |
-| POST | `/api/notifications/events` | Yes | NOTIFICATION_SEND | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1155` |
-| GET | `/api/notifications/delivery-logs` | Yes | AUDIT_LOG_VIEW | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1167` |
-| PATCH | `/api/notifications/preferences/:userId` | Yes | CONTEXTUAL_POLICY | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1171` |
-| POST | `/api/clinical/interaction-check` | Yes | PRESCRIPTION_READ | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1198` |
-| POST | `/api/clinical/overrides` | Yes | PRESCRIPTION_DISPENSE | - | - | Clinical assignment or approved workflow | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1209` |
-| POST | `/api/inventory/scan` | Yes | INVENTORY_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1223` |
-| GET | `/api/inventory/alerts` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1235` |
-| GET | `/api/engineering/control-center` | Yes | SYSTEM_CONFIGURE | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1239` |
+| GET | `/health` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:157` |
+| GET | `/ready` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:158` |
+| GET | `/api/health` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:159` |
+| GET | `/api/ready` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:160` |
+| GET | `/api/auth/user` | Yes | CONTEXTUAL_POLICY | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:172` |
+| PATCH | `/api/orders/:id/approve` | Yes | ORDER_MANAGE | Owner or scoped permission | Actor/resource branch where applicable | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:197` |
+| PATCH | `/api/orders/:id/reject` | Yes | ORDER_MANAGE | Owner or scoped permission | Actor/resource branch where applicable | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:208` |
+| GET | `/api/staff/approvals` | Yes | ORDER_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:219` |
+| GET | `/api/staff/members` | Yes | STAFF_MANAGE_BRANCH | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:236` |
+| GET | `/api/staff/support-tickets` | Yes | NOTIFICATION_SEND | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:246` |
+| GET | `/api/admin/stats` | Yes | REPORT_VIEW | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:257` |
+| GET | `/api/admin/inventory` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:267` |
+| GET | `/api/admin/branches` | Yes | BRANCH_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:285` |
+| GET | `/api/admin/users` | Yes | STAFF_MANAGE_SYSTEM | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:295` |
+| PATCH | `/api/admin/users/:id/role` | Yes | STAFF_MANAGE_SYSTEM | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:315` |
+| POST | `/api/admin/inventory/batch` | Yes | INVENTORY_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:336` |
+| PATCH | `/api/admin/inventory/batch/:id` | Yes | INVENTORY_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:346` |
+| GET | `/api/inventory/low-stock` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:356` |
+| GET | `/api/inventory/expiring` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:367` |
+| GET | `/api/products/categories` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:382` |
+| GET | `/api/products` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:393` |
+| GET | `/api/products/featured` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:403` |
+| GET | `/api/products/:id` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:413` |
+| POST | `/api/admin/products` | Yes | PRODUCT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:426` |
+| PATCH | `/api/admin/products/:id` | Yes | PRODUCT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:436` |
+| GET | `/api/prescriptions/pending` | Yes | PRESCRIPTION_DISPENSE | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:450` |
+| GET | `/api/prescriptions/patient/:patientId` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:460` |
+| GET | `/api/prescriptions/:id` | Yes | CONTEXTUAL_POLICY | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:473` |
+| POST | `/api/prescriptions` | Yes | CONTEXTUAL_POLICY | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:491` |
+| PATCH | `/api/prescriptions/:id/review` | Yes | PRESCRIPTION_DISPENSE | - | - | Clinical assignment or approved workflow | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:509` |
+| GET | `/api/orders` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:545` |
+| GET | `/api/orders/:id` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:564` |
+| POST | `/api/orders` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:584` |
+| PATCH | `/api/orders/:id` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:638` |
+| GET | `/api/drivers/active` | Yes | CONTEXTUAL_POLICY | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:657` |
+| GET | `/api/driver/deliveries/active` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:678` |
+| GET | `/api/deliveries` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:700` |
+| PATCH | `/api/deliveries/:id/status` | Yes | DELIVERY_MANAGE | - | - | Assigned driver | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:710` |
+| POST | `/api/deliveries` | Yes | ORDER_MANAGE | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:746` |
+| POST | `/api/payments/process` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:756` |
+| POST | `/api/payments/check/:transactionId` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:797` |
+| GET | `/api/payments/operators/:phoneNumber` | No | PUBLIC | Owner or scoped permission | - | - | Validated state transition | - | Policy; handler coverage pending | `server/routes.ts:813` |
+| GET | `/api/appointments/patient/:patientId` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:829` |
+| POST | `/api/appointments` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:842` |
+| PATCH | `/api/users/:id` | Yes | CONTEXTUAL_POLICY | Owner or scoped permission | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:866` |
+| GET | `/api/branches` | No | PUBLIC | - | Actor/resource branch where applicable | - | - | - | Policy; handler coverage pending | `server/routes.ts:893` |
+| GET | `/api/branches/:id` | No | PUBLIC | - | Actor/resource branch where applicable | - | - | - | Policy; handler coverage pending | `server/routes.ts:903` |
+| GET | `/api/admin/audit-logs` | Yes | AUDIT_LOG_VIEW | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:916` |
+| POST | `/api/admin/branches` | Yes | BRANCH_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:926` |
+| PATCH | `/api/admin/branches/:id` | Yes | BRANCH_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:936` |
+| GET | `/api/content` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:950` |
+| GET | `/api/content/:slug` | No | PUBLIC | - | - | - | - | - | Policy; handler coverage pending | `server/routes.ts:961` |
+| POST | `/api/admin/content` | Yes | CONTENT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:974` |
+| PATCH | `/api/admin/content/:id` | Yes | CONTENT_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:985` |
+| GET | `/api/audit-logs` | Yes | AUDIT_LOG_VIEW | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:999` |
+| POST | `/api/emergency-access` | Yes | PATIENT_PROFILE_READ | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1010` |
+| PATCH | `/api/emergency-access/:id/review` | Yes | AUDIT_LOG_VIEW | - | - | - | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1039` |
+| GET | `/api/appointments` | Yes | APPOINTMENT_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1056` |
+| GET | `/api/appointments/:id` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1066` |
+| PATCH | `/api/appointments/:id` | Yes | CONTEXTUAL_POLICY | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1084` |
+| GET | `/api/driver/deliveries/history` | Yes | DELIVERY_READ | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1106` |
+| GET | `/api/staff/stats` | Yes | REPORT_VIEW | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1128` |
+| POST | `/api/notifications/events` | Yes | NOTIFICATION_SEND | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1170` |
+| GET | `/api/notifications/delivery-logs` | Yes | AUDIT_LOG_VIEW | - | - | Assigned driver | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1182` |
+| PATCH | `/api/notifications/preferences/:userId` | Yes | CONTEXTUAL_POLICY | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1186` |
+| POST | `/api/clinical/interaction-check` | Yes | PRESCRIPTION_READ | - | - | Clinical assignment or approved workflow | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1213` |
+| POST | `/api/clinical/overrides` | Yes | PRESCRIPTION_DISPENSE | - | - | Clinical assignment or approved workflow | Validated state transition | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1224` |
+| POST | `/api/inventory/scan` | Yes | INVENTORY_MANAGE | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1238` |
+| GET | `/api/inventory/alerts` | Yes | INVENTORY_READ | - | Actor/resource branch where applicable | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1250` |
+| GET | `/api/engineering/control-center` | Yes | SYSTEM_CONFIGURE | - | - | - | - | 401 / 403 or 404 | Policy; handler coverage pending | `server/routes.ts:1254` |

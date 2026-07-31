@@ -79,6 +79,7 @@ export interface IStorage {
   createOrder(order: InsertOrder): Promise<Order>;
   createOrderWithItems(order: InsertOrder, items: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }>;
   updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order>;
+  updateOrderWithAudit(id: string, order: Partial<InsertOrder>, audit: InsertAuditLog): Promise<Order>;
 
   // Order Item operations
   getOrderItems(orderId: string): Promise<OrderItem[]>;
@@ -377,6 +378,15 @@ export class DatabaseStorage implements IStorage {
       .where(eq(orders.id, id))
       .returning();
     return order;
+  }
+
+  async updateOrderWithAudit(id: string, orderData: Partial<InsertOrder>, audit: InsertAuditLog): Promise<Order> {
+    return db.transaction(async (tx) => {
+      const [order] = await tx.update(orders).set({ ...orderData, updatedAt: new Date() }).where(eq(orders.id, id)).returning();
+      if (!order) throw new Error('Order not found');
+      await tx.insert(auditLogs).values(audit);
+      return order;
+    });
   }
 
   // Order Item operations

@@ -35,6 +35,16 @@ test('prescription review rolls back when its audit insert fails', async () => {
   assert.equal(unchanged?.reviewedBy, undefined);
 });
 
+test('payment-state update rolls back when its audit insert fails', async () => {
+  const storage = new FailingAuditStorage();
+  const order = await storage.createOrder({ customerId: 'patient-a', branchId: 'branch-a', subtotal: '10', total: '10', paymentStatus: 'pending' });
+  await assert.rejects(
+    storage.updateOrderWithAudit(order.id, { paymentStatus: 'completed' }, audit('payment.confirmed')),
+    /deliberate audit failure/,
+  );
+  assert.equal((await storage.getOrder(order.id))?.paymentStatus, 'pending');
+});
+
 test('successful transactional mutations append audit entries', async () => {
   const storage = new MemoryStorage();
   await storage.upsertUser({ id: 'user-a', role: 'patient' });

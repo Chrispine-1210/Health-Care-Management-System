@@ -21,6 +21,7 @@ import { authService } from "./authSystem";
 import { breakGlassService } from "./breakGlassService";
 import {
   canCreateAppointmentFor,
+  canInitiatePayment,
   canManageDelivery,
   canReadOrder,
   canReadPatientData,
@@ -60,6 +61,11 @@ const orderCreateSchema = z.object({
   deliveryLatitude: z.coerce.number().min(-90).max(90).optional(),
   deliveryLongitude: z.coerce.number().min(-180).max(180).optional(),
   paymentMethod: z.enum(['cash', 'airtel_money', 'tnm_mpamba', 'card', 'bank_transfer']).optional(),
+}).strict();
+const paymentInitiationSchema = z.object({
+  orderId: z.string(),
+  method: z.enum(['airtel_money', 'tnm_mpamba', 'card', 'cash']),
+  phoneNumber: z.string().min(9).max(20),
 }).strict();
 
 const appointmentUpdateSchema = z.object({
@@ -749,14 +755,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/payments/process', authenticateToken, async (req: any, res) => {
     try {
-      const { orderId, method, phoneNumber } = req.body;
-      const order = await getStorage().getOrder(orderId);
+      const { orderId, method, phoneNumber } = paymentInitiationSchema.parse(req.body);
+      const order = await getStorage().getOrderForOwner(orderId, req.user.id);
       
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
       }
-      if (!canReadOrder(req.user, order)) {
-        return res.status(403).json({ message: "Cannot pay for this order" });
+      if (!canInitiatePayment(req.user, { ownerId: order.customerId, recordStatus: order.paymentStatus })) {
+        return res.status(409).json({ message: "Payment cannot be initiated" });
       }
 
       // Import payment gateway
@@ -771,14 +777,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       if (paymentResult.success) {
-        await getStorage().updateOrder(orderId, { 
+        const audit = buildAuditEvent(req, { action: 'payment.initiated', entityType: 'order', entityId: orderId, changes: { method, status: paymentResult.status, outcome: 'success' } });
+        await getStorage().updateOrderWithAudit(orderId, {
           paymentStatus: paymentResult.status === 'completed' ? 'completed' : 'processing',
-          paymentMethod: method 
-        });
+          paymentMethod: method,
+        }, audit);
       }
 
       res.json(paymentResult);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ success: false, message: 'Invalid request body', status: 'failed' });
+      }
       console.error("Payment error:", error);
       res.status(500).json({ success: false, message: "Payment failed", status: 'failed' });
     }
@@ -788,6 +798,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { transactionId } = req.params;
       const { default: paymentGateway } = await import('./payment-gateway');
+      const orderId = paymentGateway.getTransactionOrderId(transactionId);
+      if (!orderId || !await getStorage().getOrderForOwner(orderId, req.user!.id)) {
+        return res.status(404).json({ message: 'Payment transaction not found' });
+      }
       const status = await paymentGateway.checkPaymentStatus(transactionId);
       res.json(status);
     } catch (error) {
@@ -863,6 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updated = await getStorage().updateUser(userId, changes);
       res.json(updated);
     } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ success: false, message: 'Invalid request body', status: 'failed' });
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid request body" });
       }

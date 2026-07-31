@@ -300,6 +300,19 @@ export class MemoryStorage implements IStorage {
     return updated;
   }
 
+  async updateOrderWithAudit(id: string, orderData: Partial<InsertOrder>, audit: InsertAuditLog): Promise<Order> {
+    const previous = this.orders.get(id);
+    if (!previous) throw new Error('Order not found');
+    try {
+      const order = await this.updateOrder(id, orderData);
+      await this.createAuditLog(audit);
+      return order;
+    } catch (error) {
+      this.orders.set(id, previous);
+      throw error;
+    }
+  }
+
   async reviewPrescriptionWithAudit(id: string, prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription> {
     const previous = this.prescriptions.get(id);
     if (!previous) throw new Error('Prescription not found');
