@@ -481,6 +481,18 @@ export class MemoryStorage implements IStorage {
     return updated;
   }
 
+  async updateAppointmentWithAudit(id: string, appointmentData: Partial<InsertAppointment>, audit: InsertAuditLog): Promise<Appointment> {
+    const previous = this.appointments.get(id);
+    const updated = await this.updateAppointment(id, appointmentData);
+    try {
+      await this.createAuditLog(audit);
+      return updated;
+    } catch (error) {
+      if (previous) this.appointments.set(id, previous);
+      throw error;
+    }
+  }
+
   async reviewEmergencyAccessGrantWithAudit(id: string, changes: Partial<InsertEmergencyAccessGrant>, audit: InsertAuditLog): Promise<EmergencyAccessGrant | undefined> {
     const previous = this.emergencyAccessGrants.get(id);
     const updated = await this.reviewEmergencyAccessGrant(id, changes);

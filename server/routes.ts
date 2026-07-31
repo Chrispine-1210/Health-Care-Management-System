@@ -81,6 +81,22 @@ const appointmentUpdateSchema = z.object({
   completedAt: z.coerce.date().nullable().optional(),
 }).strict();
 
+const patientAppointmentUpdateSchema = z.object({
+  scheduledAt: z.coerce.date().optional(),
+  duration: z.number().int().min(5).max(120).optional(),
+  type: z.enum(['video', 'phone', 'in-person']).optional(),
+  status: z.literal('cancelled').optional(),
+}).strict();
+
+const appointmentStatusTransitions: Record<string, readonly string[]> = {
+  scheduled: ['confirmed', 'cancelled', 'no_show'],
+  confirmed: ['in_progress', 'cancelled', 'no_show'],
+  in_progress: ['completed', 'cancelled'],
+  completed: [],
+  cancelled: [],
+  no_show: [],
+};
+
 const customerAppointmentCreateSchema = z.object({
   branchId: z.string().nullable().optional(),
   scheduledAt: z.coerce.date(),
@@ -1099,10 +1115,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!canUpdateAppointment(req.user!, existing)) {
         return res.status(403).json({ message: "Cannot update this appointment" });
       }
-      const changes = appointmentUpdateSchema.parse(req.body);
-      const appointment = await getStorage().updateAppointment(req.params.id, changes);
+      const isPatient = normalizeHealthcareRole(req.user!.role) === 'patient';
+      const changes = (isPatient ? patientAppointmentUpdateSchema : appointmentUpdateSchema).parse(req.body);
+      if (changes.status && !appointmentStatusTransitions[existing.status]?.includes(changes.status)) {
+        return res.status(409).json({ message: 'Appointment state transition is not permitted' });
+      }
+      const appointment = await getStorage().updateAppointmentWithAudit(
+        req.params.id,
+        changes,
+        buildAuditEvent(req, {
+          action: changes.status === 'cancelled' ? 'appointment.cancelled' : 'appointment.updated',
+          entityType: 'appointment',
+          entityId: req.params.id,
+          changes: { fields: Object.keys(changes), outcome: 'success' },
+        }),
+      );
       res.json(appointment);
     } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid request body' });
       console.error("Error updating appointment:", error);
       res.status(500).json({ message: "Failed to update appointment" });
     }

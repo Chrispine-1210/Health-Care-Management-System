@@ -94,6 +94,21 @@ test('emergency-access review rolls back when its audit insert fails', async () 
   assert.equal((await storage.getEmergencyAccessGrant(grant.id))?.reviewState, 'pending');
 });
 
+test('appointment update rolls back when its audit insert fails', async () => {
+  const storage = new FailingAuditStorage();
+  const appointment = await storage.createAppointment({
+    patientId: 'patient-a',
+    scheduledAt: new Date('2026-01-02T09:00:00.000Z'),
+    type: 'in-person',
+    status: 'scheduled',
+  });
+  await assert.rejects(
+    storage.updateAppointmentWithAudit(appointment.id, { status: 'cancelled' }, audit('appointment.cancelled')),
+    /deliberate audit failure/,
+  );
+  assert.equal((await storage.getAppointment(appointment.id))?.status, 'scheduled');
+});
+
 test('successful transactional mutations append audit entries', async () => {
   const storage = new MemoryStorage();
   await storage.upsertUser({ id: 'user-a', role: 'patient' });

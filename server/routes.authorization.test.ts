@@ -41,6 +41,12 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     paymentStatus: 'pending',
   });
   const orderB = await storage.createOrder({ customerId: patientB.userId, branchId: 'branch-b', subtotal: '10.00', total: '10.00' });
+  const appointmentA = await storage.createAppointment({
+    patientId: patientA.userId,
+    scheduledAt: new Date('2026-08-03T09:00:00.000Z'),
+    type: 'in-person',
+    status: 'scheduled',
+  });
 
   const app = express();
   app.use(express.json());
@@ -125,6 +131,22 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.notEqual(privilegeInjection.status, 200);
   assert.equal((await storage.getUser(patientA.userId))?.role, 'patient');
   assert.equal((await storage.getUser(patientA.userId))?.branchId, null);
+
+  const clinicalFieldInjection = await request(`/api/appointments/${appointmentA.id}`, patientA.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ consultationNotes: 'Client-controlled clinical note', status: 'completed' }),
+  });
+  assert.equal(clinicalFieldInjection.status, 400);
+  assert.equal((await storage.getAppointment(appointmentA.id))?.consultationNotes, undefined);
+  assert.equal((await storage.getAppointment(appointmentA.id))?.status, 'scheduled');
+
+  const cancellation = await request(`/api/appointments/${appointmentA.id}`, patientA.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'cancelled' }),
+  });
+  assert.equal(cancellation.status, 200);
+  assert.equal((await storage.getAppointment(appointmentA.id))?.status, 'cancelled');
+  assert.ok((await storage.getAuditLogs()).some((entry) => entry.action === 'appointment.cancelled' && entry.entityId === appointmentA.id));
 
   const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
   assert.equal(forbiddenPermission.status, 403);

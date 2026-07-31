@@ -115,6 +115,7 @@ export interface IStorage {
   getAppointmentsByPractitioner(practitionerId: string): Promise<Appointment[]>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: string, appointment: Partial<InsertAppointment>): Promise<Appointment>;
+  updateAppointmentWithAudit(id: string, appointment: Partial<InsertAppointment>, audit: InsertAuditLog): Promise<Appointment>;
 
   // Content operations
   getContentItems(status?: string): Promise<ContentItem[]>;
@@ -538,6 +539,18 @@ export class DatabaseStorage implements IStorage {
       .where(eq(appointments.id, id))
       .returning();
     return appointment;
+  }
+
+  async updateAppointmentWithAudit(id: string, appointmentData: Partial<InsertAppointment>, audit: InsertAuditLog): Promise<Appointment> {
+    return db.transaction(async (tx) => {
+      const [appointment] = await tx.update(appointments)
+        .set({ ...appointmentData, updatedAt: new Date() })
+        .where(eq(appointments.id, id))
+        .returning();
+      if (!appointment) throw new Error('Appointment not found');
+      await tx.insert(auditLogs).values(audit);
+      return appointment;
+    });
   }
 
   // Content operations
