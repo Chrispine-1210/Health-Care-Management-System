@@ -1,7 +1,7 @@
 {
-  "name": "Thandizo Healthcare - Mtendere Cloud",
+  "name": "Thandizo Healthcare",
   "short_name": "Thandizo",
-  "description": "Secure healthcare cloud for medication ordering, prescriptions, delivery coordination, and Mtendere branch operations in Malawi.",
+  "description": "Secure healthcare platform for medication ordering, prescriptions, delivery coordination, and pharmacy operations in Malawi.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

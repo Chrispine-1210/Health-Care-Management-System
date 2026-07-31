@@ -99,7 +99,7 @@ export default function Landing() {
                 Thandizo Healthcare
               </div>
               <p className="hidden text-xs font-medium text-muted-foreground sm:block">
-                Mtendere-ready pharmacy cloud platform
+                Secure pharmacy cloud platform
               </p>
             </div>
           </Link>
@@ -125,7 +125,7 @@ export default function Landing() {
               Production-ready healthcare operations for Malawi
             </Badge>
             <h1 className="max-w-4xl text-5xl font-black tracking-tight text-foreground sm:text-6xl lg:text-7xl">
-              Secure pharmacy care, delivery, and operations — elevated for Mtendere.
+              Secure pharmacy care, delivery, and operations for Malawi.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground sm:text-xl">
               Thandizo Healthcare unifies prescription review, medicine ordering, branch inventory,
@@ -255,7 +255,7 @@ export default function Landing() {
             <Card className="border-primary/10 bg-primary text-primary-foreground shadow-2xl shadow-primary/20" id="cloud">
               <CardContent className="p-8 sm:p-10">
                 <Badge className="mb-5 bg-white/15 text-white hover:bg-white/20">Vercel + Cloudflare</Badge>
-                <h2 className="text-4xl font-black tracking-tight">Custom-domain deployment path for Mtendere Healthcare.</h2>
+                <h2 className="text-4xl font-black tracking-tight">Production-ready custom-domain deployment.</h2>
                 <p className="mt-4 max-w-2xl text-lg leading-8 opacity-90">
                   Deploy the static web app on Vercel, point Cloudflare DNS to Vercel, set
                   <code className="mx-1 rounded bg-white/15 px-1.5 py-0.5">VITE_API_BASE_URL</code>
@@ -337,7 +337,7 @@ export default function Landing() {
 
       <footer className="border-t bg-background/90">
         <div className="container mx-auto flex flex-col gap-3 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Thandizo Healthcare. Built for secure Mtendere Healthcare operations.</p>
+          <p>© 2026 Thandizo Healthcare. All rights reserved.</p>
           <p>HTTPS • PWA • Role-based healthcare workflows • Cloudflare-ready</p>
         </div>
       </footer>
