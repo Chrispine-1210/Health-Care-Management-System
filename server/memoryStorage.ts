@@ -130,6 +130,11 @@ export class MemoryStorage implements IStorage {
     return this.products.get(id);
   }
 
+  async getProductBySku(sku: string): Promise<Product | undefined> {
+    if (!sku) return undefined;
+    return Array.from(this.products.values()).find((product) => product.sku === sku);
+  }
+
   async getFeaturedProducts(): Promise<Product[]> {
     return Array.from(this.products.values()).slice(0, 4);
   }

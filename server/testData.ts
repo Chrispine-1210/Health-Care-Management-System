@@ -25,24 +25,25 @@ export async function seedTestData() {
     ];
 
     for (const product of products) {
-      await storage.createProduct(product);
+      if (!await storage.getProductBySku(product.sku)) {
+        await storage.createProduct(product);
+      }
     }
 
-    // Create test orders
-    const order = await storage.createOrder({
-      customerId: "customer-1",
-      branchId: "default-branch-id",
-      subtotal: "500",
-      total: "1000",
-      status: "pending",
-      deliveryAddress: "123 Main St, Lilongwe",
-      deliveryLatitude: "-13.9626",
-      deliveryLongitude: "33.7741",
-      deliveryDistance: "5",
-    });
+    const existingOrders = await storage.getOrdersByCustomer("customer-1");
+    if (existingOrders.length === 0) {
+      const order = await storage.createOrder({
+        customerId: "customer-1",
+        branchId: "default-branch-id",
+        subtotal: "500",
+        total: "1000",
+        status: "pending",
+        deliveryAddress: "123 Main St, Lilongwe",
+        deliveryLatitude: "-13.9626",
+        deliveryLongitude: "33.7741",
+        deliveryDistance: "5",
+      });
 
-    // Create test delivery
-    if (order) {
       await storage.createDelivery({
         orderId: order.id,
         driverId: "driver-1",
