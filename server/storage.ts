@@ -3,6 +3,7 @@ import {
   branches,
   products,
   stockBatches,
+  stockMovements,
   orders,
   orderItems,
   prescriptions,
@@ -19,6 +20,7 @@ import {
   type InsertProduct,
   type StockBatch,
   type InsertStockBatch,
+  type StockMovement,
   type Order,
   type InsertOrder,
   type OrderItem,
@@ -37,7 +39,8 @@ import {
   type InsertEmergencyAccessGrant,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql, lt, lte, gte } from "drizzle-orm";
+import { eq, and, desc, sql, lt, lte, gte, gt } from "drizzle-orm";
+import { InsufficientStockError } from "./storageErrors";
 
 export interface IStorage {
   // User operations (required for Replit Auth)
@@ -72,6 +75,7 @@ export interface IStorage {
   getExpiringBatches(daysThreshold: number): Promise<StockBatch[]>;
   createStockBatch(batch: InsertStockBatch): Promise<StockBatch>;
   updateStockBatch(id: string, batch: Partial<InsertStockBatch>): Promise<StockBatch>;
+  getStockMovements(filters?: { batchId?: string; branchId?: string }): Promise<StockMovement[]>;
 
   // Order operations
   getAllOrdersForOperations(): Promise<Order[]>;
@@ -329,6 +333,16 @@ export class DatabaseStorage implements IStorage {
     return order;
   }
 
+  async getStockMovements(filters: { batchId?: string; branchId?: string } = {}): Promise<StockMovement[]> {
+    const conditions = [
+      ...(filters.batchId ? [eq(stockMovements.batchId, filters.batchId)] : []),
+      ...(filters.branchId ? [eq(stockMovements.branchId, filters.branchId)] : []),
+    ];
+    return conditions.length
+      ? await db.select().from(stockMovements).where(and(...conditions)).orderBy(desc(stockMovements.createdAt))
+      : await db.select().from(stockMovements).orderBy(desc(stockMovements.createdAt));
+  }
+
   async getProductBySku(sku: string): Promise<Product | undefined> {
     if (!sku) return undefined;
     const [product] = await db.select().from(products).where(eq(products.sku, sku));
@@ -360,9 +374,56 @@ export class DatabaseStorage implements IStorage {
   async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
     return db.transaction(async (tx) => {
       const [order] = await tx.insert(orders).values(orderData).returning();
-      const createdItems = itemData.length
-        ? await tx.insert(orderItems).values(itemData.map((item) => ({ ...item, orderId: order.id }))).returning()
-        : [];
+      const createdItems: OrderItem[] = [];
+      for (const item of itemData) {
+        let remaining = item.quantity;
+        const candidates = await tx.select().from(stockBatches).where(and(
+          eq(stockBatches.productId, item.productId),
+          eq(stockBatches.branchId, order.branchId),
+          eq(stockBatches.status, 'active'),
+          gt(stockBatches.expiryDate, new Date()),
+          gt(stockBatches.quantity, 0),
+          ...(item.batchId ? [eq(stockBatches.id, item.batchId)] : []),
+        )).orderBy(stockBatches.expiryDate);
+
+        for (const batch of candidates) {
+          if (remaining === 0) break;
+          const reserved = Math.min(batch.quantity, remaining);
+          const [updatedBatch] = await tx.update(stockBatches)
+            .set({ quantity: sql`${stockBatches.quantity} - ${reserved}`, updatedAt: new Date() })
+            .where(and(
+              eq(stockBatches.id, batch.id),
+              eq(stockBatches.status, 'active'),
+              gt(stockBatches.expiryDate, new Date()),
+              gte(stockBatches.quantity, reserved),
+            ))
+            .returning();
+          if (!updatedBatch) continue;
+
+          const [createdItem] = await tx.insert(orderItems).values({
+            ...item,
+            batchId: batch.id,
+            orderId: order.id,
+            quantity: reserved,
+            subtotal: (Number(item.unitPrice) * reserved).toFixed(2),
+          }).returning();
+          createdItems.push(createdItem);
+          await tx.insert(stockMovements).values({
+            productId: item.productId,
+            batchId: batch.id,
+            branchId: order.branchId,
+            orderId: order.id,
+            movementType: 'reservation',
+            quantityDelta: -reserved,
+            balanceAfter: updatedBatch.quantity,
+            reason: 'Reserved for customer order',
+            performedBy: audit.userId,
+          });
+          remaining -= reserved;
+        }
+
+        if (remaining > 0) throw new InsufficientStockError(item.productId);
+      }
       await tx.insert(auditLogs).values({ ...audit, entityId: audit.entityId ?? order.id });
       return { order, items: createdItems };
     });

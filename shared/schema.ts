@@ -41,6 +41,8 @@ export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'airtel_money
 export const deliveryStatusEnum = pgEnum('delivery_status', ['pending', 'assigned', 'picked_up', 'in_transit', 'delivered', 'failed']);
 export const appointmentStatusEnum = pgEnum('appointment_status', ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show']);
 export const contentStatusEnum = pgEnum('content_status', ['draft', 'published', 'archived']);
+export const stockBatchStatusEnum = pgEnum('stock_batch_status', ['active', 'quarantined', 'recalled', 'expired', 'damaged', 'returned', 'destroyed']);
+export const stockMovementTypeEnum = pgEnum('stock_movement_type', ['receipt', 'reservation', 'release', 'dispense', 'adjustment', 'transfer_in', 'transfer_out', 'return', 'quarantine', 'destruction']);
 
 // ============================================================================
 // SESSION TABLE (Required for Replit Auth)
@@ -185,6 +187,7 @@ export const stockBatches = pgTable("stock_batches", {
   expiryDate: timestamp("expiry_date").notNull(),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).notNull(),
   supplierName: varchar("supplier_name", { length: 255 }),
+  status: stockBatchStatusEnum("status").notNull().default('active'),
   receivedAt: timestamp("received_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -194,7 +197,7 @@ export const stockBatches = pgTable("stock_batches", {
   index("idx_stock_batches_expiry").on(table.expiryDate),
 ]);
 
-export const stockBatchesRelations = relations(stockBatches, ({ one }) => ({
+export const stockBatchesRelations = relations(stockBatches, ({ one, many }) => ({
   product: one(products, {
     fields: [stockBatches.productId],
     references: [products.id],
@@ -203,6 +206,7 @@ export const stockBatchesRelations = relations(stockBatches, ({ one }) => ({
     fields: [stockBatches.branchId],
     references: [branches.id],
   }),
+  movements: many(stockMovements),
 }));
 
 export const insertStockBatchSchema = createInsertSchema(stockBatches).omit({
@@ -213,6 +217,36 @@ export const insertStockBatchSchema = createInsertSchema(stockBatches).omit({
 
 export type StockBatch = typeof stockBatches.$inferSelect;
 export type InsertStockBatch = z.infer<typeof insertStockBatchSchema>;
+
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull(),
+  batchId: varchar("batch_id").notNull(),
+  branchId: varchar("branch_id").notNull(),
+  orderId: varchar("order_id"),
+  movementType: stockMovementTypeEnum("movement_type").notNull(),
+  quantityDelta: integer("quantity_delta").notNull(),
+  balanceAfter: integer("balance_after").notNull(),
+  reason: text("reason").notNull(),
+  performedBy: varchar("performed_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_stock_movements_batch_created").on(table.batchId, table.createdAt),
+  index("idx_stock_movements_branch_created").on(table.branchId, table.createdAt),
+  index("idx_stock_movements_order").on(table.orderId),
+]);
+
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  product: one(products, { fields: [stockMovements.productId], references: [products.id] }),
+  batch: one(stockBatches, { fields: [stockMovements.batchId], references: [stockBatches.id] }),
+  branch: one(branches, { fields: [stockMovements.branchId], references: [branches.id] }),
+  order: one(orders, { fields: [stockMovements.orderId], references: [orders.id] }),
+  actor: one(users, { fields: [stockMovements.performedBy], references: [users.id] }),
+}));
+
+export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({ id: true, createdAt: true });
+export type StockMovement = typeof stockMovements.$inferSelect;
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
 
 // ============================================================================
 // PRESCRIPTIONS

@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storageManager";
+import { InsufficientStockError } from "./storageErrors";
 import { authenticateToken, requirePermission } from "./authMiddleware";
 import { canRoleAssign, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
 import { registerAuthRoutes } from "./auth-routes";
@@ -670,6 +671,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.status(201).json({ ...order, items: createdItems });
     } catch (error) {
+      if (error instanceof InsufficientStockError) {
+        return res.status(409).json({ message: "Insufficient eligible stock", productId: error.productId });
+      }
       console.error("Error creating order:", error);
       res.status(500).json({ message: "Failed to create order" });
     }
@@ -1044,6 +1048,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching audit logs:", error);
       res.status(500).json({ message: "Failed to fetch audit logs" });
+    }
+  });
+
+  app.get('/api/inventory/movements', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), async (req, res) => {
+    try {
+      const batchId = z.string().max(255).optional().parse(req.query.batchId);
+      const role = normalizeHealthcareRole(req.user!.role);
+      const branchScoped = role === 'pharmacist' || role === 'receptionist' || role === 'branch_administrator';
+      if (branchScoped && !req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+      const movements = await getStorage().getStockMovements({
+        batchId,
+        branchId: branchScoped ? req.user!.branchId! : undefined,
+      });
+      res.json(movements);
+    } catch (error) {
+      console.error("Error fetching stock movements:", error);
+      res.status(500).json({ message: "Failed to fetch stock movements" });
     }
   });
 

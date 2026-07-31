@@ -50,6 +50,18 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     status: 'scheduled',
   });
   const pendingPrescription = await storage.createPrescription({ patientId: patientA.userId, status: 'pending' });
+  await storage.createStockBatch({ productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
+  await storage.createStockBatch({ productId: 'product-b', branchId: 'branch-b', batchNumber: 'B-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
+  await storage.createOrderWithItemsAndAudit(
+    { customerId: patientA.userId, branchId: 'branch-a', subtotal: '10', total: '10' },
+    [{ productId: 'product-a', quantity: 1, unitPrice: '10', subtotal: '10' }],
+    { userId: patientA.userId, action: 'order.created', entityType: 'order' },
+  );
+  await storage.createOrderWithItemsAndAudit(
+    { customerId: patientB.userId, branchId: 'branch-b', subtotal: '10', total: '10' },
+    [{ productId: 'product-b', quantity: 1, unitPrice: '10', subtotal: '10' }],
+    { userId: patientB.userId, action: 'order.created', entityType: 'order' },
+  );
 
   const app = express();
   app.use(express.json());
@@ -83,6 +95,14 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(sameBranchOrder.status, 200);
   const wrongBranchOrder = await request(`/api/orders/${orderB.id}`, branchAdministrator.token);
   assert.equal(wrongBranchOrder.status, 404);
+
+  const patientStockLedger = await request('/api/inventory/movements', patientA.token);
+  assert.equal(patientStockLedger.status, 403);
+  const branchStockLedger = await request('/api/inventory/movements', branchAdministrator.token);
+  assert.equal(branchStockLedger.status, 200);
+  const branchMovements = await branchStockLedger.json() as Array<{ branchId: string }>;
+  assert.equal(branchMovements.length, 1);
+  assert.equal(branchMovements[0].branchId, 'branch-a');
 
   const wrongOwnerPayment = await request('/api/payments/process', patientB.token, {
     method: 'POST',

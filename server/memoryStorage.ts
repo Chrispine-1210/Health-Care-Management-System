@@ -1,7 +1,8 @@
-import { IStorage } from "./storage";
+import type { IStorage } from "./storage";
+import { InsufficientStockError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
-  StockBatch, InsertStockBatch, Order, InsertOrder, OrderItem, InsertOrderItem,
+  StockBatch, InsertStockBatch, StockMovement, Order, InsertOrder, OrderItem, InsertOrderItem,
   Prescription, InsertPrescription, Delivery, InsertDelivery,
   Appointment, InsertAppointment, ContentItem, InsertContentItem,
   AuditLog, InsertAuditLog, EmergencyAccessGrant, InsertEmergencyAccessGrant
@@ -12,6 +13,7 @@ export class MemoryStorage implements IStorage {
   private branches = new Map<string, Branch>();
   private products = new Map<string, Product>();
   private stockBatches = new Map<string, StockBatch>();
+  private stockMovements: StockMovement[] = [];
   private orders = new Map<string, Order>();
   private orderItems = new Map<string, OrderItem[]>();
   private prescriptions = new Map<string, Prescription>();
@@ -182,7 +184,7 @@ export class MemoryStorage implements IStorage {
 
   async createStockBatch(batchData: InsertStockBatch): Promise<StockBatch> {
     const id = Math.random().toString(36).substring(7);
-    const batch = { id, ...batchData, createdAt: new Date(), updatedAt: new Date() } as StockBatch;
+    const batch = { id, status: 'active', ...batchData, createdAt: new Date(), updatedAt: new Date() } as StockBatch;
     this.stockBatches.set(id, batch);
     return batch;
   }
@@ -219,6 +221,13 @@ export class MemoryStorage implements IStorage {
     return order;
   }
 
+  async getStockMovements(filters: { batchId?: string; branchId?: string } = {}): Promise<StockMovement[]> {
+    const movements = this.stockMovements.filter((movement) =>
+      (!filters.batchId || movement.batchId === filters.batchId)
+      && (!filters.branchId || movement.branchId === filters.branchId));
+    return [...movements].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
   async getOrderForOwner(id: string, ownerId: string): Promise<Order | undefined> {
     if (!id || !ownerId) return undefined;
     const order = this.orders.get(id);
@@ -247,13 +256,61 @@ export class MemoryStorage implements IStorage {
   }
 
   async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
-    const created = await this.createOrderWithItems(orderData, itemData);
+    const batchSnapshot = new Map(Array.from(this.stockBatches.entries(), ([id, batch]) => [id, { ...batch }]));
+    const movementCount = this.stockMovements.length;
+    const order = await this.createOrder(orderData);
     try {
-      await this.createAuditLog({ ...audit, entityId: audit.entityId ?? created.order.id });
-      return created;
+      const createdItems: OrderItem[] = [];
+      for (const item of itemData) {
+        let remaining = item.quantity;
+        const candidates = Array.from(this.stockBatches.values())
+          .filter((batch) => batch.productId === item.productId
+            && batch.branchId === order.branchId
+            && batch.status === 'active'
+            && batch.quantity > 0
+            && new Date(batch.expiryDate) > new Date()
+            && (!item.batchId || batch.id === item.batchId))
+          .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
+
+        for (const batch of candidates) {
+          if (remaining === 0) break;
+          const reserved = Math.min(batch.quantity, remaining);
+          const balanceAfter = batch.quantity - reserved;
+          this.stockBatches.set(batch.id, { ...batch, quantity: balanceAfter, updatedAt: new Date() });
+          createdItems.push({
+            id: crypto.randomUUID(),
+            ...item,
+            batchId: batch.id,
+            orderId: order.id,
+            quantity: reserved,
+            subtotal: (Number(item.unitPrice) * reserved).toFixed(2),
+            createdAt: new Date(),
+          } as OrderItem);
+          this.stockMovements.push({
+            id: crypto.randomUUID(),
+            productId: item.productId,
+            batchId: batch.id,
+            branchId: order.branchId,
+            orderId: order.id,
+            movementType: 'reservation',
+            quantityDelta: -reserved,
+            balanceAfter,
+            reason: 'Reserved for customer order',
+            performedBy: audit.userId ?? null,
+            createdAt: new Date(),
+          });
+          remaining -= reserved;
+        }
+        if (remaining > 0) throw new InsufficientStockError(item.productId);
+      }
+      this.orderItems.set(order.id, createdItems);
+      await this.createAuditLog({ ...audit, entityId: audit.entityId ?? order.id });
+      return { order, items: createdItems };
     } catch (error) {
-      this.orders.delete(created.order.id);
-      this.orderItems.delete(created.order.id);
+      this.orders.delete(order.id);
+      this.orderItems.delete(order.id);
+      this.stockBatches = batchSnapshot;
+      this.stockMovements.length = movementCount;
       throw error;
     }
   }

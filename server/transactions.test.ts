@@ -55,6 +55,10 @@ test('payment-state update rolls back when its audit insert fails', async () => 
 
 test('order creation rolls back order and items when its audit insert fails', async () => {
   const storage = new FailingAuditStorage();
+  const batch = await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+  });
   await assert.rejects(
     storage.createOrderWithItemsAndAudit(
       { customerId: 'patient-a', branchId: 'branch-a', subtotal: '10', total: '10' },
@@ -63,6 +67,54 @@ test('order creation rolls back order and items when its audit insert fails', as
     ),
     /deliberate audit failure/,
   );
+  assert.deepEqual(await storage.getOrdersByCustomer('patient-a'), []);
+  assert.equal((await storage.getStockBatchesByProduct('product-a'))[0].quantity, 5);
+  assert.deepEqual(await storage.getStockMovements({ batchId: batch.id }), []);
+});
+
+test('order reservation uses FEFO batches and records immutable movement balances', async () => {
+  const storage = new MemoryStorage();
+  const later = await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'LATER', quantity: 5,
+    expiryDate: new Date('2031-01-01T00:00:00.000Z'), costPrice: '5',
+  });
+  const earlier = await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'EARLIER', quantity: 2,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+  });
+  const created = await storage.createOrderWithItemsAndAudit(
+    { customerId: 'patient-a', branchId: 'branch-a', subtotal: '40', total: '40' },
+    [{ productId: 'product-a', quantity: 4, unitPrice: '10', subtotal: '40' }],
+    audit('order.created'),
+  );
+
+  assert.deepEqual(created.items.map((item) => [item.batchId, item.quantity]), [[earlier.id, 2], [later.id, 2]]);
+  assert.equal((await storage.getStockBatchesByProduct('product-a')).find((batch) => batch.id === earlier.id)?.quantity, 0);
+  assert.equal((await storage.getStockBatchesByProduct('product-a')).find((batch) => batch.id === later.id)?.quantity, 3);
+  assert.deepEqual((await storage.getStockMovements()).map((movement) => movement.balanceAfter).sort(), [0, 3]);
+});
+
+test('insufficient eligible stock rolls back reservations and rejects quarantined batches', async () => {
+  const storage = new MemoryStorage();
+  const active = await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'ACTIVE', quantity: 2,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+  });
+  await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'QUARANTINED', quantity: 100,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5', status: 'quarantined',
+  });
+
+  await assert.rejects(
+    storage.createOrderWithItemsAndAudit(
+      { customerId: 'patient-a', branchId: 'branch-a', subtotal: '30', total: '30' },
+      [{ productId: 'product-a', quantity: 3, unitPrice: '10', subtotal: '30' }],
+      audit('order.created'),
+    ),
+    /Insufficient eligible stock/,
+  );
+  assert.equal((await storage.getStockBatchesByProduct('product-a')).find((batch) => batch.id === active.id)?.quantity, 2);
+  assert.deepEqual(await storage.getStockMovements(), []);
   assert.deepEqual(await storage.getOrdersByCustomer('patient-a'), []);
 });
 
@@ -148,6 +200,10 @@ test('successful transactional mutations append audit entries', async () => {
   const storage = new MemoryStorage();
   await storage.upsertUser({ id: 'user-a', role: 'patient' });
   const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending' });
+  await storage.createStockBatch({
+    productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5,
+    expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5',
+  });
   const createdOrder = await storage.createOrderWithItemsAndAudit(
     { customerId: 'patient-a', branchId: 'branch-a', subtotal: '10', total: '10' },
     [{ productId: 'product-a', quantity: 1, unitPrice: '10', subtotal: '10' }],

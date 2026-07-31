@@ -14,4 +14,5 @@ for (const file of files) {
 }
 if (!files.some((file) => file.includes('healthcare_roles'))) throw new Error('Healthcare role migration is missing');
 if (!files.some((file) => file.includes('immutable_audit_logs'))) throw new Error('Immutable audit migration is missing');
+if (!files.some((file) => file.includes('stock_movement_ledger'))) throw new Error('Stock movement ledger migration is missing');
 process.stdout.write(`Validated ${files.length} ordered migrations\n`);
