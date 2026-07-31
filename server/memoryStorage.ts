@@ -314,9 +314,9 @@ export class MemoryStorage implements IStorage {
     }
   }
 
-  async reviewPrescriptionWithAudit(id: string, prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription> {
+  async reviewPrescriptionWithAudit(id: string, expectedStatus: Prescription['status'], prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription | undefined> {
     const previous = this.prescriptions.get(id);
-    if (!previous) throw new Error('Prescription not found');
+    if (!previous || previous.status !== expectedStatus) return undefined;
     try {
       const prescription = await this.updatePrescription(id, prescriptionData);
       await this.createAuditLog(audit);

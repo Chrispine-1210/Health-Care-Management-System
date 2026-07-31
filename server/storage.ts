@@ -96,7 +96,7 @@ export interface IStorage {
   getPendingPrescriptions(): Promise<Prescription[]>;
   createPrescription(prescription: InsertPrescription): Promise<Prescription>;
   updatePrescription(id: string, prescription: Partial<InsertPrescription>): Promise<Prescription>;
-  reviewPrescriptionWithAudit(id: string, prescription: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription>;
+  reviewPrescriptionWithAudit(id: string, expectedStatus: Prescription['status'], prescription: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription | undefined>;
 
   // Delivery operations
   getAllDeliveriesForOperations(): Promise<Delivery[]>;
@@ -447,13 +447,13 @@ export class DatabaseStorage implements IStorage {
     return prescription;
   }
 
-  async reviewPrescriptionWithAudit(id: string, prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription> {
+  async reviewPrescriptionWithAudit(id: string, expectedStatus: Prescription['status'], prescriptionData: Partial<InsertPrescription>, audit: InsertAuditLog): Promise<Prescription | undefined> {
     return db.transaction(async (tx) => {
       const [prescription] = await tx.update(prescriptions)
         .set({ ...prescriptionData, updatedAt: new Date() })
-        .where(eq(prescriptions.id, id))
+        .where(and(eq(prescriptions.id, id), eq(prescriptions.status, expectedStatus)))
         .returning();
-      if (!prescription) throw new Error('Prescription not found');
+      if (!prescription) return undefined;
       await tx.insert(auditLogs).values(audit);
       return prescription;
     });

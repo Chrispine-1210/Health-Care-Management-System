@@ -35,7 +35,7 @@ test('prescription review rolls back when its audit insert fails', async () => {
   const storage = new FailingAuditStorage();
   const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending' });
   await assert.rejects(
-    storage.reviewPrescriptionWithAudit(prescription.id, { status: 'approved', reviewedBy: 'pharmacist-a' }, audit('prescription.review')),
+    storage.reviewPrescriptionWithAudit(prescription.id, 'pending', { status: 'approved', reviewedBy: 'pharmacist-a' }, audit('prescription.review')),
     /deliberate audit failure/,
   );
   const unchanged = await storage.getPrescription(prescription.id);
@@ -109,12 +109,34 @@ test('appointment update rolls back when its audit insert fails', async () => {
   assert.equal((await storage.getAppointment(appointment.id))?.status, 'scheduled');
 });
 
+test('stale prescription review cannot overwrite a completed transition', async () => {
+  const storage = new MemoryStorage();
+  const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending' });
+  const approved = await storage.reviewPrescriptionWithAudit(
+    prescription.id,
+    'pending',
+    { status: 'approved' },
+    audit('prescription.approved'),
+  );
+  assert.equal(approved?.status, 'approved');
+
+  const staleReview = await storage.reviewPrescriptionWithAudit(
+    prescription.id,
+    'pending',
+    { status: 'rejected' },
+    audit('prescription.rejected'),
+  );
+  assert.equal(staleReview, undefined);
+  assert.equal((await storage.getPrescription(prescription.id))?.status, 'approved');
+  assert.deepEqual((await storage.getAuditLogs()).map((entry) => entry.action), ['prescription.approved']);
+});
+
 test('successful transactional mutations append audit entries', async () => {
   const storage = new MemoryStorage();
   await storage.upsertUser({ id: 'user-a', role: 'patient' });
   const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending' });
   await storage.assignUserRoleWithAudit('user-a', 'receptionist', 'branch-a', audit('user.role.change'));
-  await storage.reviewPrescriptionWithAudit(prescription.id, { status: 'approved' }, audit('prescription.review'));
+  await storage.reviewPrescriptionWithAudit(prescription.id, 'pending', { status: 'approved' }, audit('prescription.review'));
   const logs = await storage.getAuditLogs();
   assert.deepEqual(logs.map((entry) => entry.action).sort(), ['prescription.review', 'user.role.change']);
 });

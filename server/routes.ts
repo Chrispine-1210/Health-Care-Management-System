@@ -135,6 +135,14 @@ const prescriptionReviewSchema = z.object({
   status: z.enum(['approved', 'rejected', 'dispensed']),
   reviewNotes: z.string().max(5000).nullable().optional(),
 }).strict();
+
+const prescriptionStatusTransitions: Record<string, readonly string[]> = {
+  pending: ['approved', 'rejected'],
+  under_review: ['approved', 'rejected'],
+  approved: ['dispensed'],
+  rejected: [],
+  dispensed: [],
+};
 const deliveryCreateSchema = insertDeliverySchema.pick({ orderId: true, driverId: true, estimatedDeliveryTime: true }).strict();
 const deliveryStatusSchema = z.object({
   status: z.enum(['assigned', 'picked_up', 'in_transit', 'delivered', 'failed']),
@@ -531,6 +539,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!existingPrescription) {
         return res.status(404).json({ message: 'Prescription not found' });
       }
+      if (!prescriptionStatusTransitions[existingPrescription.status]?.includes(status)) {
+        return res.status(409).json({ message: 'Prescription state transition is not permitted' });
+      }
       const alerts = clinicalDecisionSupportService.evaluatePrescription(
         Array.isArray(existingPrescription.prescribedMedications) ? existingPrescription.prescribedMedications as any : [],
         { allergies: existingPrescription.patientAllergies || [], conditions: existingPrescription.patientConditions || [] },
@@ -540,12 +551,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const audit = buildAuditEvent(req, { action: 'prescription.review', entityType: 'prescription', entityId: req.params.id, changes: { status, reviewedBy: userId, alertCount: alerts.length } });
-      const prescription = await getStorage().reviewPrescriptionWithAudit(req.params.id, {
+      const prescription = await getStorage().reviewPrescriptionWithAudit(req.params.id, existingPrescription.status, {
         status,
         reviewNotes,
         reviewedBy: userId,
         reviewedAt: new Date(),
       }, audit);
+      if (!prescription) return res.status(409).json({ message: 'Prescription state changed; reload and retry' });
       
       res.json(prescription);
     } catch (error) {

@@ -28,10 +28,12 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   const patientB = await tokenFor('patient', 'route-b');
   const administrator = await tokenFor('system_administrator', 'route-admin');
   const branchAdministrator = await tokenFor('branch_administrator', 'route-branch-admin');
+  const pharmacist = await tokenFor('pharmacist', 'route-pharmacist');
 
   await storage.upsertUser({ id: patientA.userId, email: 'patient-a@example.test', role: 'patient', firstName: 'Patient', lastName: 'A' });
   await storage.upsertUser({ id: patientB.userId, email: 'patient-b@example.test', role: 'patient', firstName: 'Patient', lastName: 'B' });
   await storage.upsertUser({ id: branchAdministrator.userId, email: 'branch-admin@example.test', role: 'branch_administrator', branchId: 'branch-a' });
+  await storage.upsertUser({ id: pharmacist.userId, email: 'pharmacist@example.test', role: 'pharmacist', branchId: 'branch-a' });
   const orderA = await storage.createOrder({
     customerId: patientA.userId,
     branchId: 'branch-a',
@@ -47,6 +49,7 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     type: 'in-person',
     status: 'scheduled',
   });
+  const pendingPrescription = await storage.createPrescription({ patientId: patientA.userId, status: 'pending' });
 
   const app = express();
   app.use(express.json());
@@ -147,6 +150,32 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(cancellation.status, 200);
   assert.equal((await storage.getAppointment(appointmentA.id))?.status, 'cancelled');
   assert.ok((await storage.getAuditLogs()).some((entry) => entry.action === 'appointment.cancelled' && entry.entityId === appointmentA.id));
+
+  const prematureDispensing = await request(`/api/prescriptions/${pendingPrescription.id}/review`, pharmacist.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'dispensed' }),
+  });
+  assert.equal(prematureDispensing.status, 409);
+  assert.equal((await storage.getPrescription(pendingPrescription.id))?.status, 'pending');
+
+  const approval = await request(`/api/prescriptions/${pendingPrescription.id}/review`, pharmacist.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'approved' }),
+  });
+  assert.equal(approval.status, 200);
+
+  const repeatedApproval = await request(`/api/prescriptions/${pendingPrescription.id}/review`, pharmacist.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'approved' }),
+  });
+  assert.equal(repeatedApproval.status, 409);
+
+  const dispensing = await request(`/api/prescriptions/${pendingPrescription.id}/review`, pharmacist.token, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'dispensed' }),
+  });
+  assert.equal(dispensing.status, 200);
+  assert.equal((await storage.getPrescription(pendingPrescription.id))?.status, 'dispensed');
 
   const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
   assert.equal(forbiddenPermission.status, 403);
