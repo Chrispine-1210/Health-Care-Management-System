@@ -11,3 +11,10 @@ export class InvalidStockAdjustmentError extends Error {
     this.name = 'InvalidStockAdjustmentError';
   }
 }
+
+export class InvalidOrderCancellationError extends Error {
+  constructor(public readonly code: 'NOT_FOUND' | 'NOT_ELIGIBLE' | 'IDEMPOTENCY_CONFLICT', message: string) {
+    super(message);
+    this.name = 'InvalidOrderCancellationError';
+  }
+}

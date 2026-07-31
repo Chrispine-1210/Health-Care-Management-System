@@ -4,6 +4,7 @@ import {
   products,
   stockBatches,
   stockMovements,
+  inventoryReservations,
   orders,
   orderItems,
   prescriptions,
@@ -21,6 +22,7 @@ import {
   type StockBatch,
   type InsertStockBatch,
   type StockMovement,
+  type InventoryReservation,
   type Order,
   type InsertOrder,
   type OrderItem,
@@ -40,7 +42,20 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, lt, lte, gte, gt } from "drizzle-orm";
-import { InsufficientStockError, InvalidStockAdjustmentError } from "./storageErrors";
+import { InsufficientStockError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
+
+export interface ReleasedReservation {
+  reservationId: string;
+  productId: string;
+  batchId: string;
+  quantityReleased: number;
+}
+
+export interface OrderCancellationResult {
+  order: Order;
+  releasedReservations: ReleasedReservation[];
+  idempotentReplay: boolean;
+}
 
 export interface IStorage {
   // User operations (required for Replit Auth)
@@ -92,6 +107,8 @@ export interface IStorage {
   createOrderWithItemsAndAudit(order: InsertOrder, items: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }>;
   updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order>;
   updateOrderWithAudit(id: string, order: Partial<InsertOrder>, audit: InsertAuditLog): Promise<Order>;
+  cancelOrderWithAudit(input: { orderId: string; actorId: string; reasonCode: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<OrderCancellationResult>;
+  getReservationsByOrder(orderId: string): Promise<InventoryReservation[]>;
 
   // Order Item operations
   getOrderItems(orderId: string): Promise<OrderItem[]>;
@@ -281,7 +298,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getLowStockBatches(threshold: number = 10): Promise<StockBatch[]> {
-    return await db.select().from(stockBatches).where(lte(stockBatches.quantity, threshold));
+    return await db.select().from(stockBatches).where(lte(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, threshold));
   }
 
   async getExpiringBatches(daysThreshold: number = 30): Promise<StockBatch[]> {
@@ -339,14 +356,18 @@ export class DatabaseStorage implements IStorage {
   async createStockBatchWithAudit(batchData: InsertStockBatch, audit: InsertAuditLog): Promise<StockBatch> {
     return db.transaction(async (tx) => {
       const [batch] = await tx.insert(stockBatches).values(batchData).returning();
-      if (batch.quantity > 0) {
+      if (batch.quantityOnHand > 0) {
         await tx.insert(stockMovements).values({
           productId: batch.productId,
           batchId: batch.id,
           branchId: batch.branchId,
           movementType: 'receipt',
-          quantityDelta: batch.quantity,
-          balanceAfter: batch.quantity,
+          quantityDelta: batch.quantityOnHand,
+          balanceAfter: batch.quantityOnHand,
+          quantityOnHandBefore: 0,
+          quantityOnHandAfter: batch.quantityOnHand,
+          quantityReservedBefore: 0,
+          quantityReservedAfter: 0,
           reason: 'Initial batch receipt',
           performedBy: audit.userId,
         });
@@ -358,7 +379,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateStockBatchWithAudit(id: string, branchId: string, batchData: Partial<InsertStockBatch>, audit: InsertAuditLog): Promise<StockBatch | undefined> {
     return db.transaction(async (tx) => {
-      const { quantity: _quantity, branchId: _branchId, ...allowedChanges } = batchData;
+      const { quantityOnHand: _quantityOnHand, quantityReserved: _quantityReserved, branchId: _branchId, ...allowedChanges } = batchData;
       const [batch] = await tx.update(stockBatches)
         .set({ ...allowedChanges, updatedAt: new Date() })
         .where(and(eq(stockBatches.id, id), eq(stockBatches.branchId, branchId)))
@@ -374,10 +395,10 @@ export class DatabaseStorage implements IStorage {
     return db.transaction(async (tx) => {
       const [current] = await tx.select().from(stockBatches).where(and(eq(stockBatches.id, id), eq(stockBatches.branchId, branchId)));
       if (!current) return undefined;
-      if (current.quantity + quantityDelta < 0) throw new InvalidStockAdjustmentError();
-      const balanceCondition = quantityDelta < 0 ? gte(stockBatches.quantity, Math.abs(quantityDelta)) : undefined;
+      if (current.quantityOnHand + quantityDelta < current.quantityReserved) throw new InvalidStockAdjustmentError();
+      const balanceCondition = quantityDelta < 0 ? gte(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, Math.abs(quantityDelta)) : undefined;
       const [batch] = await tx.update(stockBatches)
-        .set({ quantity: sql`${stockBatches.quantity} + ${quantityDelta}`, updatedAt: new Date() })
+        .set({ quantityOnHand: sql`${stockBatches.quantityOnHand} + ${quantityDelta}`, updatedAt: new Date() })
         .where(and(eq(stockBatches.id, id), eq(stockBatches.branchId, branchId), balanceCondition))
         .returning();
       if (!batch) throw new InvalidStockAdjustmentError('Concurrent stock change prevented this adjustment');
@@ -387,7 +408,11 @@ export class DatabaseStorage implements IStorage {
         branchId: batch.branchId,
         movementType: 'adjustment',
         quantityDelta,
-        balanceAfter: batch.quantity,
+        balanceAfter: batch.quantityOnHand - batch.quantityReserved,
+        quantityOnHandBefore: current.quantityOnHand,
+        quantityOnHandAfter: batch.quantityOnHand,
+        quantityReservedBefore: current.quantityReserved,
+        quantityReservedAfter: batch.quantityReserved,
         reason,
         performedBy: audit.userId,
       });
@@ -445,20 +470,20 @@ export class DatabaseStorage implements IStorage {
           eq(stockBatches.branchId, order.branchId),
           eq(stockBatches.status, 'active'),
           gt(stockBatches.expiryDate, new Date()),
-          gt(stockBatches.quantity, 0),
+          gt(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, 0),
           ...(item.batchId ? [eq(stockBatches.id, item.batchId)] : []),
         )).orderBy(stockBatches.expiryDate);
 
         for (const batch of candidates) {
           if (remaining === 0) break;
-          const reserved = Math.min(batch.quantity, remaining);
+          const reserved = Math.min(batch.quantityOnHand - batch.quantityReserved, remaining);
           const [updatedBatch] = await tx.update(stockBatches)
-            .set({ quantity: sql`${stockBatches.quantity} - ${reserved}`, updatedAt: new Date() })
+            .set({ quantityReserved: sql`${stockBatches.quantityReserved} + ${reserved}`, updatedAt: new Date() })
             .where(and(
               eq(stockBatches.id, batch.id),
               eq(stockBatches.status, 'active'),
               gt(stockBatches.expiryDate, new Date()),
-              gte(stockBatches.quantity, reserved),
+              gte(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, reserved),
             ))
             .returning();
           if (!updatedBatch) continue;
@@ -471,14 +496,28 @@ export class DatabaseStorage implements IStorage {
             subtotal: (Number(item.unitPrice) * reserved).toFixed(2),
           }).returning();
           createdItems.push(createdItem);
+          const [reservation] = await tx.insert(inventoryReservations).values({
+            orderId: order.id,
+            orderItemId: createdItem.id,
+            productId: item.productId,
+            batchId: batch.id,
+            branchId: order.branchId,
+            quantityReserved: reserved,
+          }).returning();
           await tx.insert(stockMovements).values({
             productId: item.productId,
             batchId: batch.id,
             branchId: order.branchId,
             orderId: order.id,
+            orderItemId: createdItem.id,
+            reservationId: reservation.id,
             movementType: 'reservation',
             quantityDelta: -reserved,
-            balanceAfter: updatedBatch.quantity,
+            balanceAfter: updatedBatch.quantityOnHand - updatedBatch.quantityReserved,
+            quantityOnHandBefore: batch.quantityOnHand,
+            quantityOnHandAfter: updatedBatch.quantityOnHand,
+            quantityReservedBefore: batch.quantityReserved,
+            quantityReservedAfter: updatedBatch.quantityReserved,
             reason: 'Reserved for customer order',
             performedBy: audit.userId,
           });
@@ -507,6 +546,82 @@ export class DatabaseStorage implements IStorage {
       if (!order) throw new Error('Order not found');
       await tx.insert(auditLogs).values(audit);
       return order;
+    });
+  }
+
+  async getReservationsByOrder(orderId: string): Promise<InventoryReservation[]> {
+    return db.select().from(inventoryReservations).where(eq(inventoryReservations.orderId, orderId));
+  }
+
+  async cancelOrderWithAudit(input: { orderId: string; actorId: string; reasonCode: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<OrderCancellationResult> {
+    return db.transaction(async (tx) => {
+      const [order] = await tx.select().from(orders).where(eq(orders.id, input.orderId)).for('update');
+      if (!order) throw new InvalidOrderCancellationError('NOT_FOUND', 'Order not found');
+      const existingReservations = await tx.select().from(inventoryReservations)
+        .where(eq(inventoryReservations.orderId, order.id)).for('update');
+      if (order.status === 'cancelled' || order.status === 'partially_cancelled') {
+        if (order.cancellationIdempotencyKey !== input.idempotencyKey) {
+          throw new InvalidOrderCancellationError('IDEMPOTENCY_CONFLICT', 'Order has already been cancelled');
+        }
+        return {
+          order,
+          releasedReservations: existingReservations.filter((reservation) => reservation.quantityReleased > 0).map((reservation) => ({
+            reservationId: reservation.id, productId: reservation.productId, batchId: reservation.batchId,
+            quantityReleased: reservation.quantityReleased,
+          })),
+          idempotentReplay: true,
+        };
+      }
+      if (!['pending', 'confirmed', 'processing', 'ready'].includes(order.status)) {
+        throw new InvalidOrderCancellationError('NOT_ELIGIBLE', `Order in ${order.status} status cannot be cancelled`);
+      }
+
+      const activeReservations = existingReservations.filter((reservation) =>
+        ['active', 'partially_dispensed', 'partially_released'].includes(reservation.status));
+      const releasedReservations: ReleasedReservation[] = [];
+      let hasDispensedQuantity = false;
+      for (const reservation of activeReservations) {
+        const releasable = Math.max(0, reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased);
+        if (reservation.quantityDispensed > 0) hasDispensedQuantity = true;
+        if (releasable === 0) continue;
+        const [batch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, reservation.batchId)).for('update');
+        if (!batch || batch.quantityReserved < releasable) throw new InvalidOrderCancellationError('NOT_ELIGIBLE', 'Reservation and batch balances are inconsistent');
+        const [updatedBatch] = await tx.update(stockBatches)
+          .set({ quantityReserved: sql`${stockBatches.quantityReserved} - ${releasable}`, updatedAt: new Date() })
+          .where(and(eq(stockBatches.id, batch.id), gte(stockBatches.quantityReserved, releasable)))
+          .returning();
+        if (!updatedBatch) throw new InvalidOrderCancellationError('NOT_ELIGIBLE', 'Concurrent stock change prevented cancellation');
+        const nextStatus = reservation.quantityDispensed > 0 ? 'partially_released' : 'released';
+        const [updatedReservation] = await tx.update(inventoryReservations).set({
+          quantityReleased: reservation.quantityReleased + releasable,
+          status: nextStatus,
+          version: reservation.version + 1,
+          updatedAt: new Date(),
+        }).where(and(eq(inventoryReservations.id, reservation.id), eq(inventoryReservations.version, reservation.version))).returning();
+        if (!updatedReservation) throw new InvalidOrderCancellationError('NOT_ELIGIBLE', 'Concurrent reservation change prevented cancellation');
+        await tx.insert(stockMovements).values({
+          productId: reservation.productId, batchId: reservation.batchId, branchId: reservation.branchId,
+          orderId: order.id, orderItemId: reservation.orderItemId, reservationId: reservation.id,
+          movementType: 'release', quantityDelta: releasable,
+          balanceAfter: updatedBatch.quantityOnHand - updatedBatch.quantityReserved,
+          quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: updatedBatch.quantityOnHand,
+          quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: updatedBatch.quantityReserved,
+          reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId,
+        });
+        releasedReservations.push({ reservationId: reservation.id, productId: reservation.productId, batchId: reservation.batchId, quantityReleased: releasable });
+      }
+      const nextStatus = hasDispensedQuantity ? 'partially_cancelled' : 'cancelled';
+      const [cancelledOrder] = await tx.update(orders).set({
+        status: nextStatus,
+        cancellationReasonCode: input.reasonCode,
+        cancellationReason: input.reason,
+        cancelledBy: input.actorId,
+        cancelledAt: new Date(),
+        cancellationIdempotencyKey: input.idempotencyKey,
+        updatedAt: new Date(),
+      }).where(eq(orders.id, order.id)).returning();
+      await tx.insert(auditLogs).values({ ...audit, entityId: order.id });
+      return { order: cancelledOrder, releasedReservations, idempotentReplay: false };
     });
   }
 
@@ -760,7 +875,7 @@ export class DatabaseStorage implements IStorage {
     const productCount = await db.select({ count: sql<number>`count(*)` }).from(products).where(eq(products.isActive, true));
     
     // Get low stock items
-    const lowStock = await db.select({ count: sql<number>`count(*)` }).from(stockBatches).where(lte(stockBatches.quantity, 10));
+    const lowStock = await db.select({ count: sql<number>`count(*)` }).from(stockBatches).where(lte(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, 10));
     
     // Get expiring items
     const futureDate = new Date();

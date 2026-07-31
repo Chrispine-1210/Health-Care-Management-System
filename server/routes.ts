@@ -1,9 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storageManager";
-import { InsufficientStockError, InvalidStockAdjustmentError } from "./storageErrors";
+import { InsufficientStockError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import { authenticateToken, requirePermission } from "./authMiddleware";
-import { canRoleAssign, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
+import { canRoleAssign, hasPermission, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
 import { registerAuthRoutes } from "./auth-routes";
 import { logger } from "./logger";
 import { validateInput, loginSchema, signupSchema } from "./validation";
@@ -42,12 +42,22 @@ async function canReadPatientFromRequest(req: { user?: { id: string; role: strin
 }
 
 const orderUpdateSchema = z.object({
-  status: z.enum(['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']).optional(),
-  paymentStatus: z.enum(['pending', 'processing', 'completed', 'failed', 'refunded']).optional(),
+  status: z.enum(['confirmed', 'processing', 'ready', 'in_transit', 'delivered']).optional(),
   notes: z.string().max(2000).nullable().optional(),
   deliveryAddress: z.string().max(500).nullable().optional(),
   deliveryCity: z.string().max(100).nullable().optional(),
 }).strict();
+const orderStatusTransitions: Record<string, readonly string[]> = {
+  pending: ['confirmed', 'processing'],
+  confirmed: ['processing'],
+  processing: ['ready'],
+  ready: ['in_transit', 'delivered'],
+  in_transit: ['delivered'],
+  delivered: [],
+  partially_cancelled: [],
+  fully_dispensed: [],
+  cancelled: [],
+};
 
 const orderCreateSchema = z.object({
   items: z.array(z.object({
@@ -66,6 +76,10 @@ const paymentInitiationSchema = z.object({
   orderId: z.string(),
   method: z.enum(['airtel_money', 'tnm_mpamba', 'card', 'cash']),
   phoneNumber: z.string().min(9).max(20),
+}).strict();
+const orderCancellationSchema = z.object({
+  reasonCode: z.enum(['CUSTOMER_REQUEST', 'PRESCRIPTION_REJECTED', 'PAYMENT_FAILED', 'OPERATIONAL']),
+  reason: z.string().trim().min(10).max(1000),
 }).strict();
 
 const appointmentUpdateSchema = z.object({
@@ -116,11 +130,11 @@ const selfProfileUpdateSchema = z.object({
   licenseNumber: z.string().max(100).nullable().optional(),
 }).strict();
 
-const stockBatchCreateSchema = insertStockBatchSchema.extend({
+const stockBatchCreateSchema = insertStockBatchSchema.omit({ quantityReserved: true }).extend({
   expiryDate: z.coerce.date(),
   receivedAt: z.coerce.date().nullable().optional(),
 }).strict();
-const stockBatchUpdateSchema = stockBatchCreateSchema.omit({ quantity: true, branchId: true }).partial().strict();
+const stockBatchUpdateSchema = stockBatchCreateSchema.omit({ quantityOnHand: true, branchId: true }).partial().strict();
 const stockAdjustmentSchema = z.object({
   quantityDelta: z.number().int().min(-1000000).max(1000000).refine((value) => value !== 0, 'Quantity delta must not be zero'),
   reason: z.string().trim().min(10).max(1000),
@@ -370,7 +384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.user!.branchId || input.branchId !== req.user!.branchId) return res.status(403).json({ message: 'Cannot receive stock for another branch' });
       const audit = buildAuditEvent(req, {
         action: 'stock.received', entityType: 'stock_batch',
-        changes: { productId: input.productId, branchId: input.branchId, batchNumber: input.batchNumber, quantity: input.quantity },
+        changes: { productId: input.productId, branchId: input.branchId, batchNumber: input.batchNumber, quantityOnHand: input.quantityOnHand },
       });
       const batch = await getStorage().createStockBatchWithAudit(input, audit);
       res.status(201).json(batch);
@@ -717,15 +731,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/orders/:orderId/cancel', authenticateToken, requirePermission(PERMISSIONS.ORDER_CANCEL), async (req, res) => {
+    try {
+      const payload = orderCancellationSchema.parse(req.body);
+      const idempotencyKey = z.string().min(8).max(128).parse(req.headers['idempotency-key']);
+      const existingOrder = normalizeHealthcareRole(req.user!.role) === 'patient'
+        ? await getStorage().getOrderForOwner(req.params.orderId, req.user!.id)
+        : await getStorage().getOrder(req.params.orderId);
+      if (!existingOrder || !canReadOrder(req.user!, existingOrder)) return res.status(404).json({ message: 'Order not found' });
+      if (existingOrder.paymentStatus === 'completed' && !hasPermission(req.user!.role, PERMISSIONS.ORDER_CANCEL_AFTER_PAYMENT)) {
+        return res.status(403).json({ message: 'Elevated approval is required to cancel a paid order' });
+      }
+      const result = await getStorage().cancelOrderWithAudit({
+        orderId: existingOrder.id,
+        actorId: req.user!.id,
+        reasonCode: payload.reasonCode,
+        reason: payload.reason,
+        idempotencyKey,
+        correlationId: res.locals.requestId,
+      }, buildAuditEvent(req, {
+        action: 'order.cancelled', entityType: 'order', entityId: existingOrder.id,
+        changes: { previousStatus: existingOrder.status, reasonCode: payload.reasonCode, reason: payload.reason, actorRole: req.user!.role },
+      }));
+
+      if (!result.idempotentReplay) {
+        const customer = await getStorage().getUser(result.order.customerId);
+        try {
+          await notificationService.enqueue({
+            eventType: 'order.cancelled',
+            channels: customer?.email ? ['email'] : [],
+            recipient: { userId: result.order.customerId, email: customer?.email ?? undefined, firstName: customer?.firstName ?? undefined },
+            template: 'custom',
+            variables: { subject: 'Order cancelled', message: `Order ${result.order.id} was cancelled.` },
+          });
+        } catch (error) {
+          logger.error('Order cancellation notification failed', { error, orderId: result.order.id });
+        }
+      }
+      res.json({
+        success: true,
+        orderId: result.order.id,
+        status: result.order.status,
+        releasedReservations: result.releasedReservations,
+        idempotentReplay: result.idempotentReplay,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid cancellation request', errors: error.issues });
+      if (error instanceof InvalidOrderCancellationError) {
+        const status = error.code === 'NOT_FOUND' ? 404 : 409;
+        return res.status(status).json({ message: error.message, code: error.code });
+      }
+      logger.error('Order cancellation failed', { error, orderId: req.params.orderId });
+      res.status(500).json({ message: 'Failed to cancel order' });
+    }
+  });
+
   app.patch('/api/orders/:id', authenticateToken, async (req, res) => {
     try {
       if (!canUpdateOrder(req.user!)) {
         return res.status(403).json({ message: "Cannot update orders" });
       }
       const changes = orderUpdateSchema.parse(req.body);
-      const order = await getStorage().updateOrder(req.params.id, changes);
+      const existingOrder = await getStorage().getOrder(req.params.id);
+      if (!existingOrder || !canReadOrder(req.user!, existingOrder)) return res.status(404).json({ message: 'Order not found' });
+      if (changes.status && !orderStatusTransitions[existingOrder.status]?.includes(changes.status)) {
+        return res.status(409).json({ message: `Order cannot transition from ${existingOrder.status} to ${changes.status}` });
+      }
+      const order = await getStorage().updateOrderWithAudit(req.params.id, changes, buildAuditEvent(req, {
+        action: 'order.updated', entityType: 'order', entityId: req.params.id,
+        changes: { previousStatus: existingOrder.status, ...changes },
+      }));
       res.json(order);
     } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid order update', errors: error.issues });
       console.error("Error updating order:", error);
       res.status(500).json({ message: "Failed to update order" });
     }

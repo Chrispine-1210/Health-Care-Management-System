@@ -7,11 +7,12 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   process.env.JWT_SECRET = 'route-authorization-test-secret-at-least-32-characters';
   process.env.PATIENT_DATA_ENCRYPTION_KEY = 'route-test-encryption-key-at-least-32-characters';
   process.env.DATABASE_URL = 'postgresql://test:test@127.0.0.1:1/test';
-  const [{ authService }, { MemoryStorage }, { registerRoutes }, { setStorageForTesting }] = await Promise.all([
+  const [{ authService }, { MemoryStorage }, { registerRoutes }, { setStorageForTesting }, { notificationService }] = await Promise.all([
     import('./authSystem'),
     import('./memoryStorage'),
     import('./routes'),
     import('./storageManager'),
+    import('./notificationService'),
   ]);
   const tokenFor = async (role: string, suffix: string) => {
     const email = `${role}-${suffix}@example.test`;
@@ -50,9 +51,9 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     status: 'scheduled',
   });
   const pendingPrescription = await storage.createPrescription({ patientId: patientA.userId, status: 'pending' });
-  const branchBatch = await storage.createStockBatch({ productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
-  await storage.createStockBatch({ productId: 'product-b', branchId: 'branch-b', batchNumber: 'B-1', quantity: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
-  await storage.createOrderWithItemsAndAudit(
+  const branchBatch = await storage.createStockBatch({ productId: 'product-a', branchId: 'branch-a', batchNumber: 'A-1', quantityOnHand: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
+  await storage.createStockBatch({ productId: 'product-b', branchId: 'branch-b', batchNumber: 'B-1', quantityOnHand: 5, expiryDate: new Date('2030-01-01'), costPrice: '5' });
+  const cancellableOrder = await storage.createOrderWithItemsAndAudit(
     { customerId: patientA.userId, branchId: 'branch-a', subtotal: '10', total: '10' },
     [{ productId: 'product-a', quantity: 1, unitPrice: '10', subtotal: '10' }],
     { userId: patientA.userId, action: 'order.created', entityType: 'order' },
@@ -106,12 +107,17 @@ test('registered routes enforce authentication, permissions, ownership, and non-
 
   const crossBranchReceipt = await request('/api/admin/inventory/batch', pharmacist.token, {
     method: 'POST',
-    body: JSON.stringify({ productId: 'product-a', branchId: 'branch-b', batchNumber: 'CROSS', quantity: 5, expiryDate: '2030-01-01T00:00:00.000Z', costPrice: '5' }),
+    body: JSON.stringify({ productId: 'product-a', branchId: 'branch-b', batchNumber: 'CROSS', quantityOnHand: 5, expiryDate: '2030-01-01T00:00:00.000Z', costPrice: '5' }),
   });
   assert.equal(crossBranchReceipt.status, 403);
+  const reservedQuantityInjection = await request('/api/admin/inventory/batch', pharmacist.token, {
+    method: 'POST',
+    body: JSON.stringify({ productId: 'product-a', branchId: 'branch-a', batchNumber: 'INJECT', quantityOnHand: 5, quantityReserved: 5, expiryDate: '2030-01-01T00:00:00.000Z', costPrice: '5' }),
+  });
+  assert.equal(reservedQuantityInjection.status, 400);
 
   const quantityInjection = await request(`/api/admin/inventory/batch/${branchBatch.id}`, pharmacist.token, {
-    method: 'PATCH', body: JSON.stringify({ quantity: 500 }),
+    method: 'PATCH', body: JSON.stringify({ quantityOnHand: 500 }),
   });
   assert.equal(quantityInjection.status, 400);
 
@@ -119,7 +125,34 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     method: 'POST', body: JSON.stringify({ quantityDelta: -1, reason: 'Damaged unit found during physical count' }),
   });
   assert.equal(adjustment.status, 200);
-  assert.equal((await storage.getStockBatchesByProduct('product-a')).find((batch) => batch.id === branchBatch.id)?.quantity, 3);
+  assert.equal((await storage.getStockBatchesByProduct('product-a')).find((batch) => batch.id === branchBatch.id)?.quantityOnHand, 4);
+
+  const notificationCountBeforeCancellation = notificationService.getQueueStatus().length;
+  const cancellationWithoutKey = await request(`/api/orders/${cancellableOrder.order.id}/cancel`, patientA.token, {
+    method: 'POST', body: JSON.stringify({ reasonCode: 'CUSTOMER_REQUEST', reason: 'Customer requested cancellation before dispensing.' }),
+  });
+  assert.equal(cancellationWithoutKey.status, 400);
+  const otherPatientCancellation = await request(`/api/orders/${cancellableOrder.order.id}/cancel`, patientB.token, {
+    method: 'POST', headers: { 'idempotency-key': 'cancel-handler-001' },
+    body: JSON.stringify({ reasonCode: 'CUSTOMER_REQUEST', reason: 'Customer requested cancellation before dispensing.' }),
+  });
+  assert.equal(otherPatientCancellation.status, 404);
+  const cancellation = await request(`/api/orders/${cancellableOrder.order.id}/cancel`, patientA.token, {
+    method: 'POST', headers: { 'idempotency-key': 'cancel-handler-001' },
+    body: JSON.stringify({ reasonCode: 'CUSTOMER_REQUEST', reason: 'Customer requested cancellation before dispensing.' }),
+  });
+  assert.equal(cancellation.status, 200);
+  const cancellationBody = await cancellation.json() as { status: string; releasedReservations: Array<{ quantityReleased: number }>; idempotentReplay: boolean };
+  assert.equal(cancellationBody.status, 'cancelled');
+  assert.equal(cancellationBody.releasedReservations[0].quantityReleased, 1);
+  assert.equal(cancellationBody.idempotentReplay, false);
+  const cancellationReplay = await request(`/api/orders/${cancellableOrder.order.id}/cancel`, patientA.token, {
+    method: 'POST', headers: { 'idempotency-key': 'cancel-handler-001' },
+    body: JSON.stringify({ reasonCode: 'CUSTOMER_REQUEST', reason: 'Customer requested cancellation before dispensing.' }),
+  });
+  assert.equal(cancellationReplay.status, 200);
+  assert.equal((await cancellationReplay.json() as { idempotentReplay: boolean }).idempotentReplay, true);
+  assert.equal(notificationService.getQueueStatus().length, notificationCountBeforeCancellation + 1);
 
   const wrongOwnerPayment = await request('/api/payments/process', patientB.token, {
     method: 'POST',
@@ -180,11 +213,11 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal((await storage.getAppointment(appointmentA.id))?.consultationNotes, undefined);
   assert.equal((await storage.getAppointment(appointmentA.id))?.status, 'scheduled');
 
-  const cancellation = await request(`/api/appointments/${appointmentA.id}`, patientA.token, {
+  const appointmentCancellation = await request(`/api/appointments/${appointmentA.id}`, patientA.token, {
     method: 'PATCH',
     body: JSON.stringify({ status: 'cancelled' }),
   });
-  assert.equal(cancellation.status, 200);
+  assert.equal(appointmentCancellation.status, 200);
   assert.equal((await storage.getAppointment(appointmentA.id))?.status, 'cancelled');
   assert.ok((await storage.getAuditLogs()).some((entry) => entry.action === 'appointment.cancelled' && entry.entityId === appointmentA.id));
 

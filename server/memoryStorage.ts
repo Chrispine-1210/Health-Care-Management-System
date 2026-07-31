@@ -1,8 +1,9 @@
 import type { IStorage } from "./storage";
-import { InsufficientStockError, InvalidStockAdjustmentError } from "./storageErrors";
+import type { OrderCancellationResult, ReleasedReservation } from "./storage";
+import { InsufficientStockError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
-  StockBatch, InsertStockBatch, StockMovement, Order, InsertOrder, OrderItem, InsertOrderItem,
+  StockBatch, InsertStockBatch, StockMovement, InventoryReservation, Order, InsertOrder, OrderItem, InsertOrderItem,
   Prescription, InsertPrescription, Delivery, InsertDelivery,
   Appointment, InsertAppointment, ContentItem, InsertContentItem,
   AuditLog, InsertAuditLog, EmergencyAccessGrant, InsertEmergencyAccessGrant
@@ -14,6 +15,7 @@ export class MemoryStorage implements IStorage {
   private products = new Map<string, Product>();
   private stockBatches = new Map<string, StockBatch>();
   private stockMovements: StockMovement[] = [];
+  private inventoryReservations = new Map<string, InventoryReservation>();
   private orders = new Map<string, Order>();
   private orderItems = new Map<string, OrderItem[]>();
   private prescriptions = new Map<string, Prescription>();
@@ -170,7 +172,7 @@ export class MemoryStorage implements IStorage {
   }
 
   async getLowStockBatches(threshold: number): Promise<StockBatch[]> {
-    return Array.from(this.stockBatches.values()).filter(b => b.quantity <= threshold);
+    return Array.from(this.stockBatches.values()).filter(b => b.quantityOnHand - b.quantityReserved <= threshold);
   }
 
   async getExpiringBatches(daysThreshold: number): Promise<StockBatch[]> {
@@ -184,7 +186,7 @@ export class MemoryStorage implements IStorage {
 
   async createStockBatch(batchData: InsertStockBatch): Promise<StockBatch> {
     const id = Math.random().toString(36).substring(7);
-    const batch = { id, status: 'active', ...batchData, createdAt: new Date(), updatedAt: new Date() } as StockBatch;
+    const batch = { id, status: 'active', quantityReserved: 0, ...batchData, createdAt: new Date(), updatedAt: new Date() } as StockBatch;
     this.stockBatches.set(id, batch);
     return batch;
   }
@@ -216,7 +218,7 @@ export class MemoryStorage implements IStorage {
 
   async createOrder(orderData: InsertOrder): Promise<Order> {
     const id = Math.random().toString(36).substring(7);
-    const order = { id, ...orderData, createdAt: new Date(), updatedAt: new Date() } as Order;
+    const order = { id, status: 'pending', paymentStatus: 'pending', deliveryCharge: '0', ...orderData, createdAt: new Date(), updatedAt: new Date() } as Order;
     this.orders.set(id, order);
     return order;
   }
@@ -225,11 +227,12 @@ export class MemoryStorage implements IStorage {
     const movementCount = this.stockMovements.length;
     const batch = await this.createStockBatch(batchData);
     try {
-      if (batch.quantity > 0) {
+      if (batch.quantityOnHand > 0) {
         this.stockMovements.push({
           id: crypto.randomUUID(), productId: batch.productId, batchId: batch.id, branchId: batch.branchId,
-          orderId: null, movementType: 'receipt', quantityDelta: batch.quantity, balanceAfter: batch.quantity,
-          reason: 'Initial batch receipt', performedBy: audit.userId ?? null, createdAt: new Date(),
+          orderId: null, orderItemId: null, reservationId: null, movementType: 'receipt', quantityDelta: batch.quantityOnHand, balanceAfter: batch.quantityOnHand,
+          quantityOnHandBefore: 0, quantityOnHandAfter: batch.quantityOnHand, quantityReservedBefore: 0, quantityReservedAfter: 0,
+          reason: 'Initial batch receipt', performedBy: audit.userId ?? null, correlationId: null, createdAt: new Date(),
         });
       }
       await this.createAuditLog({ ...audit, entityId: audit.entityId ?? batch.id });
@@ -244,7 +247,7 @@ export class MemoryStorage implements IStorage {
   async updateStockBatchWithAudit(id: string, branchId: string, batchData: Partial<InsertStockBatch>, audit: InsertAuditLog): Promise<StockBatch | undefined> {
     const previous = this.stockBatches.get(id);
     if (!previous || previous.branchId !== branchId) return undefined;
-    const { quantity: _quantity, branchId: _branchId, ...allowedChanges } = batchData;
+    const { quantityOnHand: _quantityOnHand, quantityReserved: _quantityReserved, branchId: _branchId, ...allowedChanges } = batchData;
     const updated = { ...previous, ...allowedChanges, updatedAt: new Date() } as StockBatch;
     this.stockBatches.set(id, updated);
     try {
@@ -260,15 +263,17 @@ export class MemoryStorage implements IStorage {
     if (!Number.isInteger(quantityDelta) || quantityDelta === 0) throw new InvalidStockAdjustmentError('Quantity delta must be a non-zero integer');
     const previous = this.stockBatches.get(id);
     if (!previous || previous.branchId !== branchId) return undefined;
-    const balanceAfter = previous.quantity + quantityDelta;
-    if (balanceAfter < 0) throw new InvalidStockAdjustmentError();
+    const onHandAfter = previous.quantityOnHand + quantityDelta;
+    if (onHandAfter < previous.quantityReserved) throw new InvalidStockAdjustmentError();
     const movementCount = this.stockMovements.length;
-    const updated = { ...previous, quantity: balanceAfter, updatedAt: new Date() };
+    const updated = { ...previous, quantityOnHand: onHandAfter, updatedAt: new Date() };
     this.stockBatches.set(id, updated);
     this.stockMovements.push({
       id: crypto.randomUUID(), productId: previous.productId, batchId: id, branchId,
-      orderId: null, movementType: 'adjustment', quantityDelta, balanceAfter, reason,
-      performedBy: audit.userId ?? null, createdAt: new Date(),
+      orderId: null, orderItemId: null, reservationId: null, movementType: 'adjustment', quantityDelta, balanceAfter: onHandAfter - previous.quantityReserved, reason,
+      quantityOnHandBefore: previous.quantityOnHand, quantityOnHandAfter: onHandAfter,
+      quantityReservedBefore: previous.quantityReserved, quantityReservedAfter: previous.quantityReserved,
+      performedBy: audit.userId ?? null, correlationId: null, createdAt: new Date(),
     });
     try {
       await this.createAuditLog({ ...audit, entityId: audit.entityId ?? id });
@@ -302,7 +307,7 @@ export class MemoryStorage implements IStorage {
   async createOrderWithItems(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[]): Promise<{ order: Order; items: OrderItem[] }> {
     const orderId = Math.random().toString(36).substring(7);
     const now = new Date();
-    const order = { id: orderId, ...orderData, createdAt: now, updatedAt: now } as Order;
+    const order = { id: orderId, status: 'pending', paymentStatus: 'pending', deliveryCharge: '0', ...orderData, createdAt: now, updatedAt: now } as Order;
     const items = itemData.map((item) => ({
       id: Math.random().toString(36).substring(7),
       ...item,
@@ -316,6 +321,7 @@ export class MemoryStorage implements IStorage {
 
   async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
     const batchSnapshot = new Map(Array.from(this.stockBatches.entries(), ([id, batch]) => [id, { ...batch }]));
+    const reservationSnapshot = new Map(this.inventoryReservations);
     const movementCount = this.stockMovements.length;
     const order = await this.createOrder(orderData);
     try {
@@ -326,17 +332,17 @@ export class MemoryStorage implements IStorage {
           .filter((batch) => batch.productId === item.productId
             && batch.branchId === order.branchId
             && batch.status === 'active'
-            && batch.quantity > 0
+            && batch.quantityOnHand - batch.quantityReserved > 0
             && new Date(batch.expiryDate) > new Date()
             && (!item.batchId || batch.id === item.batchId))
           .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
 
         for (const batch of candidates) {
           if (remaining === 0) break;
-          const reserved = Math.min(batch.quantity, remaining);
-          const balanceAfter = batch.quantity - reserved;
-          this.stockBatches.set(batch.id, { ...batch, quantity: balanceAfter, updatedAt: new Date() });
-          createdItems.push({
+          const reserved = Math.min(batch.quantityOnHand - batch.quantityReserved, remaining);
+          const reservedAfter = batch.quantityReserved + reserved;
+          this.stockBatches.set(batch.id, { ...batch, quantityReserved: reservedAfter, updatedAt: new Date() });
+          const createdItem = {
             id: crypto.randomUUID(),
             ...item,
             batchId: batch.id,
@@ -344,18 +350,28 @@ export class MemoryStorage implements IStorage {
             quantity: reserved,
             subtotal: (Number(item.unitPrice) * reserved).toFixed(2),
             createdAt: new Date(),
-          } as OrderItem);
+          } as OrderItem;
+          createdItems.push(createdItem);
+          const reservation: InventoryReservation = {
+            id: crypto.randomUUID(), orderId: order.id, orderItemId: createdItem.id, productId: item.productId,
+            batchId: batch.id, branchId: order.branchId, quantityReserved: reserved, quantityDispensed: 0,
+            quantityReleased: 0, status: 'active', version: 1, createdAt: new Date(), updatedAt: new Date(),
+          };
+          this.inventoryReservations.set(reservation.id, reservation);
           this.stockMovements.push({
             id: crypto.randomUUID(),
             productId: item.productId,
             batchId: batch.id,
             branchId: order.branchId,
-            orderId: order.id,
+            orderId: order.id, orderItemId: createdItem.id, reservationId: reservation.id,
             movementType: 'reservation',
             quantityDelta: -reserved,
-            balanceAfter,
+            balanceAfter: batch.quantityOnHand - reservedAfter,
+            quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: batch.quantityOnHand,
+            quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: reservedAfter,
             reason: 'Reserved for customer order',
             performedBy: audit.userId ?? null,
+            correlationId: null,
             createdAt: new Date(),
           });
           remaining -= reserved;
@@ -369,6 +385,7 @@ export class MemoryStorage implements IStorage {
       this.orders.delete(order.id);
       this.orderItems.delete(order.id);
       this.stockBatches = batchSnapshot;
+      this.inventoryReservations = reservationSnapshot;
       this.stockMovements.length = movementCount;
       throw error;
     }
@@ -443,6 +460,86 @@ export class MemoryStorage implements IStorage {
       return order;
     } catch (error) {
       this.orders.set(id, previous);
+      throw error;
+    }
+  }
+
+  async getReservationsByOrder(orderId: string): Promise<InventoryReservation[]> {
+    return Array.from(this.inventoryReservations.values()).filter((reservation) => reservation.orderId === orderId);
+  }
+
+  async cancelOrderWithAudit(input: { orderId: string; actorId: string; reasonCode: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<OrderCancellationResult> {
+    const order = this.orders.get(input.orderId);
+    if (!order) throw new InvalidOrderCancellationError('NOT_FOUND', 'Order not found');
+    const reservations = await this.getReservationsByOrder(order.id);
+    if (order.status === 'cancelled' || order.status === 'partially_cancelled') {
+      if (order.cancellationIdempotencyKey !== input.idempotencyKey) {
+        throw new InvalidOrderCancellationError('IDEMPOTENCY_CONFLICT', 'Order has already been cancelled');
+      }
+      return {
+        order,
+        releasedReservations: reservations.filter((reservation) => reservation.quantityReleased > 0).map((reservation) => ({
+          reservationId: reservation.id, productId: reservation.productId, batchId: reservation.batchId,
+          quantityReleased: reservation.quantityReleased,
+        })),
+        idempotentReplay: true,
+      };
+    }
+    if (!['pending', 'confirmed', 'processing', 'ready'].includes(order.status)) {
+      throw new InvalidOrderCancellationError('NOT_ELIGIBLE', `Order in ${order.status} status cannot be cancelled`);
+    }
+
+    const orderSnapshot = { ...order };
+    const batchSnapshot = new Map(Array.from(this.stockBatches.entries(), ([id, batch]) => [id, { ...batch }]));
+    const reservationSnapshot = new Map(Array.from(this.inventoryReservations.entries(), ([id, reservation]) => [id, { ...reservation }]));
+    const movementCount = this.stockMovements.length;
+    const releasedReservations: ReleasedReservation[] = [];
+    let hasDispensedQuantity = false;
+    try {
+      for (const reservation of reservations.filter((item) => ['active', 'partially_dispensed', 'partially_released'].includes(item.status))) {
+        const releasable = Math.max(0, reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased);
+        if (reservation.quantityDispensed > 0) hasDispensedQuantity = true;
+        if (releasable === 0) continue;
+        const batch = this.stockBatches.get(reservation.batchId);
+        if (!batch || batch.quantityReserved < releasable) throw new InvalidOrderCancellationError('NOT_ELIGIBLE', 'Reservation and batch balances are inconsistent');
+        const reservedAfter = batch.quantityReserved - releasable;
+        this.stockBatches.set(batch.id, { ...batch, quantityReserved: reservedAfter, updatedAt: new Date() });
+        this.inventoryReservations.set(reservation.id, {
+          ...reservation,
+          quantityReleased: reservation.quantityReleased + releasable,
+          status: reservation.quantityDispensed > 0 ? 'partially_released' : 'released',
+          version: reservation.version + 1,
+          updatedAt: new Date(),
+        });
+        this.stockMovements.push({
+          id: crypto.randomUUID(), productId: reservation.productId, batchId: reservation.batchId,
+          branchId: reservation.branchId, orderId: order.id, orderItemId: reservation.orderItemId,
+          reservationId: reservation.id, movementType: 'release', quantityDelta: releasable,
+          balanceAfter: batch.quantityOnHand - reservedAfter,
+          quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: batch.quantityOnHand,
+          quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: reservedAfter,
+          reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId ?? null, createdAt: new Date(),
+        });
+        releasedReservations.push({ reservationId: reservation.id, productId: reservation.productId, batchId: reservation.batchId, quantityReleased: releasable });
+      }
+      const cancelledOrder = {
+        ...order,
+        status: hasDispensedQuantity ? 'partially_cancelled' : 'cancelled',
+        cancellationReasonCode: input.reasonCode,
+        cancellationReason: input.reason,
+        cancelledBy: input.actorId,
+        cancelledAt: new Date(),
+        cancellationIdempotencyKey: input.idempotencyKey,
+        updatedAt: new Date(),
+      } as Order;
+      this.orders.set(order.id, cancelledOrder);
+      await this.createAuditLog({ ...audit, entityId: order.id });
+      return { order: cancelledOrder, releasedReservations, idempotentReplay: false };
+    } catch (error) {
+      this.orders.set(order.id, orderSnapshot);
+      this.stockBatches = batchSnapshot;
+      this.inventoryReservations = reservationSnapshot;
+      this.stockMovements.length = movementCount;
       throw error;
     }
   }

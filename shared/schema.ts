@@ -35,7 +35,7 @@ export const accountStatusEnum = pgEnum('account_status', ['active', 'disabled',
 export const emergencyReasonEnum = pgEnum('emergency_reason', ['immediate_threat', 'continuity_of_care', 'system_outage']);
 export const emergencyReviewStateEnum = pgEnum('emergency_review_state', ['pending', 'approved', 'rejected', 'closed']);
 export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed']);
-export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']);
+export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'partially_cancelled', 'fully_dispensed', 'cancelled']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'processing', 'completed', 'failed', 'refunded']);
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'airtel_money', 'tnm_mpamba', 'card', 'bank_transfer']);
 export const deliveryStatusEnum = pgEnum('delivery_status', ['pending', 'assigned', 'picked_up', 'in_transit', 'delivered', 'failed']);
@@ -43,6 +43,7 @@ export const appointmentStatusEnum = pgEnum('appointment_status', ['scheduled', 
 export const contentStatusEnum = pgEnum('content_status', ['draft', 'published', 'archived']);
 export const stockBatchStatusEnum = pgEnum('stock_batch_status', ['active', 'quarantined', 'recalled', 'expired', 'damaged', 'returned', 'destroyed']);
 export const stockMovementTypeEnum = pgEnum('stock_movement_type', ['receipt', 'reservation', 'release', 'dispense', 'adjustment', 'transfer_in', 'transfer_out', 'return', 'quarantine', 'destruction']);
+export const reservationStatusEnum = pgEnum('reservation_status', ['active', 'partially_dispensed', 'fully_dispensed', 'partially_released', 'released', 'expired', 'cancelled']);
 
 // ============================================================================
 // SESSION TABLE (Required for Replit Auth)
@@ -183,7 +184,8 @@ export const stockBatches = pgTable("stock_batches", {
   productId: varchar("product_id").notNull(),
   branchId: varchar("branch_id").notNull(),
   batchNumber: varchar("batch_number", { length: 100 }).notNull(),
-  quantity: integer("quantity").notNull().default(0),
+  quantityOnHand: integer("quantity_on_hand").notNull().default(0),
+  quantityReserved: integer("quantity_reserved").notNull().default(0),
   expiryDate: timestamp("expiry_date").notNull(),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).notNull(),
   supplierName: varchar("supplier_name", { length: 255 }),
@@ -224,11 +226,18 @@ export const stockMovements = pgTable("stock_movements", {
   batchId: varchar("batch_id").notNull(),
   branchId: varchar("branch_id").notNull(),
   orderId: varchar("order_id"),
+  orderItemId: varchar("order_item_id"),
+  reservationId: varchar("reservation_id"),
   movementType: stockMovementTypeEnum("movement_type").notNull(),
   quantityDelta: integer("quantity_delta").notNull(),
   balanceAfter: integer("balance_after").notNull(),
+  quantityOnHandBefore: integer("quantity_on_hand_before"),
+  quantityOnHandAfter: integer("quantity_on_hand_after"),
+  quantityReservedBefore: integer("quantity_reserved_before"),
+  quantityReservedAfter: integer("quantity_reserved_after"),
   reason: text("reason").notNull(),
   performedBy: varchar("performed_by"),
+  correlationId: varchar("correlation_id", { length: 100 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("idx_stock_movements_batch_created").on(table.batchId, table.createdAt),
@@ -316,6 +325,11 @@ export const orders = pgTable("orders", {
   // Customer contact
   customerPhone: varchar("customer_phone"),
   notes: text("notes"),
+  cancellationReasonCode: varchar("cancellation_reason_code", { length: 100 }),
+  cancellationReason: text("cancellation_reason"),
+  cancelledBy: varchar("cancelled_by"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancellationIdempotencyKey: varchar("cancellation_idempotency_key", { length: 128 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -388,6 +402,27 @@ export const insertOrderItemSchema = createInsertSchema(orderItems).omit({
 
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+
+export const inventoryReservations = pgTable("inventory_reservations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(),
+  orderItemId: varchar("order_item_id").notNull().unique(),
+  productId: varchar("product_id").notNull(),
+  batchId: varchar("batch_id").notNull(),
+  branchId: varchar("branch_id").notNull(),
+  quantityReserved: integer("quantity_reserved").notNull(),
+  quantityDispensed: integer("quantity_dispensed").notNull().default(0),
+  quantityReleased: integer("quantity_released").notNull().default(0),
+  status: reservationStatusEnum("status").notNull().default('active'),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_inventory_reservations_order").on(table.orderId),
+  index("idx_inventory_reservations_batch_status").on(table.batchId, table.status),
+]);
+
+export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 
 // ============================================================================
 // DELIVERIES
