@@ -24,11 +24,6 @@ export default defineConfig({
     // Let Rollup/Vite determine chunk boundaries. The previous manual vendor
     // split produced circular chunks on Vercel that could break module startup.
   },
-  css: {
-    postcss: {
-      from: path.resolve(import.meta.dirname, "client/src/index.css"),
-    },
-  },
   server: {
     middlewareMode: true,
     hmr: {
