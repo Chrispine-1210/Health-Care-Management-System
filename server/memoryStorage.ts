@@ -1,10 +1,10 @@
 import type { IStorage } from "./storage";
-import type { OrderCancellationResult, ReleasedReservation } from "./storage";
-import { InsufficientStockError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
+import type { DispensingResult, OrderCancellationResult, OrderLineInput, ReleasedReservation } from "./storage";
+import { InsufficientStockError, InvalidDispensingError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
   StockBatch, InsertStockBatch, StockMovement, InventoryReservation, Order, InsertOrder, OrderItem, InsertOrderItem,
-  Prescription, InsertPrescription, Delivery, InsertDelivery,
+  Prescription, InsertPrescription, PrescriptionOrderItem, DispensingRecord, Delivery, InsertDelivery,
   Appointment, InsertAppointment, ContentItem, InsertContentItem,
   AuditLog, InsertAuditLog, EmergencyAccessGrant, InsertEmergencyAccessGrant
 } from "@shared/schema";
@@ -16,6 +16,8 @@ export class MemoryStorage implements IStorage {
   private stockBatches = new Map<string, StockBatch>();
   private stockMovements: StockMovement[] = [];
   private inventoryReservations = new Map<string, InventoryReservation>();
+  private prescriptionOrderItems = new Map<string, PrescriptionOrderItem>();
+  private dispensingRecords = new Map<string, DispensingRecord>();
   private orders = new Map<string, Order>();
   private orderItems = new Map<string, OrderItem[]>();
   private prescriptions = new Map<string, Prescription>();
@@ -145,7 +147,7 @@ export class MemoryStorage implements IStorage {
 
   async createProduct(productData: InsertProduct): Promise<Product> {
     const id = Math.random().toString(36).substring(7);
-    const product = { id, ...productData, createdAt: new Date(), updatedAt: new Date() } as Product;
+    const product = { id, prescriptionRequired: false, prescriptionRequirement: 'none', requiresPharmacistApproval: false, onlineSaleAllowed: true, controlledMedicine: false, maximumDispensingQuantity: null, prescriptionValidityDays: 30, allowPartialDispensing: true, allowGenericSubstitution: false, isActive: true, ...productData, createdAt: new Date(), updatedAt: new Date() } as Product;
     this.products.set(id, product);
     return product;
   }
@@ -310,6 +312,8 @@ export class MemoryStorage implements IStorage {
     const order = { id: orderId, status: 'pending', paymentStatus: 'pending', deliveryCharge: '0', ...orderData, createdAt: now, updatedAt: now } as Order;
     const items = itemData.map((item) => ({
       id: Math.random().toString(36).substring(7),
+      quantityDispensed: 0,
+      status: 'reserved',
       ...item,
       orderId,
       createdAt: now,
@@ -319,7 +323,7 @@ export class MemoryStorage implements IStorage {
     return { order, items };
   }
 
-  async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: Omit<InsertOrderItem, 'orderId'>[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
+  async createOrderWithItemsAndAudit(orderData: InsertOrder, itemData: OrderLineInput[], audit: InsertAuditLog): Promise<{ order: Order; items: OrderItem[] }> {
     const batchSnapshot = new Map(Array.from(this.stockBatches.entries(), ([id, batch]) => [id, { ...batch }]));
     const reservationSnapshot = new Map(this.inventoryReservations);
     const movementCount = this.stockMovements.length;
@@ -327,6 +331,7 @@ export class MemoryStorage implements IStorage {
     try {
       const createdItems: OrderItem[] = [];
       for (const item of itemData) {
+        const { prescriptionLink, ...stockItem } = item;
         let remaining = item.quantity;
         const candidates = Array.from(this.stockBatches.values())
           .filter((batch) => batch.productId === item.productId
@@ -344,7 +349,9 @@ export class MemoryStorage implements IStorage {
           this.stockBatches.set(batch.id, { ...batch, quantityReserved: reservedAfter, updatedAt: new Date() });
           const createdItem = {
             id: crypto.randomUUID(),
-            ...item,
+            quantityDispensed: 0,
+            status: 'reserved',
+            ...stockItem,
             batchId: batch.id,
             orderId: order.id,
             quantity: reserved,
@@ -352,6 +359,10 @@ export class MemoryStorage implements IStorage {
             createdAt: new Date(),
           } as OrderItem;
           createdItems.push(createdItem);
+          if (prescriptionLink) {
+            const link = { id: crypto.randomUUID(), branchId: order.branchId, prescriptionId: prescriptionLink.prescriptionId, orderId: order.id, orderItemId: createdItem.id, productId: item.productId, prescribedQuantity: Math.min(prescriptionLink.prescribedQuantity, reserved), authorisedQuantity: 0, dispensedQuantity: 0, approvalStatus: 'pending', substitutionAllowed: false, reviewedBy: null, reviewedAt: null, rejectionReason: null, clinicalNote: null, version: 1, createdAt: new Date(), updatedAt: new Date() } as PrescriptionOrderItem;
+            this.prescriptionOrderItems.set(link.id, link);
+          }
           const reservation: InventoryReservation = {
             id: crypto.randomUUID(), orderId: order.id, orderItemId: createdItem.id, productId: item.productId,
             batchId: batch.id, branchId: order.branchId, quantityReserved: reserved, quantityDispensed: 0,
@@ -466,6 +477,74 @@ export class MemoryStorage implements IStorage {
 
   async getReservationsByOrder(orderId: string): Promise<InventoryReservation[]> {
     return Array.from(this.inventoryReservations.values()).filter((reservation) => reservation.orderId === orderId);
+  }
+
+  async getPrescriptionOrderItem(prescriptionId: string, orderItemId: string): Promise<PrescriptionOrderItem | undefined> {
+    return Array.from(this.prescriptionOrderItems.values()).find((link) => link.prescriptionId === prescriptionId && link.orderItemId === orderItemId);
+  }
+
+  async reviewPrescriptionOrderItem(input: { prescriptionId: string; orderItemId: string; actorId: string; decision: 'approve' | 'partially_approve' | 'reject'; authorisedQuantity?: number; substitutionAllowed?: boolean; clinicalNote?: string; rejectionReason?: string }, audit: InsertAuditLog): Promise<PrescriptionOrderItem> {
+    const prescription = this.prescriptions.get(input.prescriptionId);
+    const link = await this.getPrescriptionOrderItem(input.prescriptionId, input.orderItemId);
+    if (!prescription || !link) throw new InvalidDispensingError('NOT_FOUND', 'Prescription linkage not found');
+    if (prescription.revokedAt || ['revoked', 'cancelled', 'expired'].includes(prescription.status) || (prescription.expiresAt && prescription.expiresAt <= new Date())) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Prescription is expired, revoked, or cancelled');
+    const quantity = input.decision === 'reject' ? 0 : input.authorisedQuantity ?? 0;
+    if (input.decision !== 'reject' && (quantity <= 0 || quantity > link.prescribedQuantity)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Authorised quantity exceeds the prescribed quantity or is invalid');
+    const updated = { ...link, authorisedQuantity: quantity, approvalStatus: input.decision === 'reject' ? 'rejected' : input.decision === 'partially_approve' ? 'partially_approved' : 'approved', substitutionAllowed: input.substitutionAllowed ?? false, reviewedBy: input.actorId, reviewedAt: new Date(), clinicalNote: input.clinicalNote ?? null, rejectionReason: input.rejectionReason ?? null, version: link.version + 1, updatedAt: new Date() } as PrescriptionOrderItem;
+    this.prescriptionOrderItems.set(link.id, updated);
+    await this.createAuditLog({ ...audit, entityId: link.id });
+    return updated;
+  }
+
+  async dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult> {
+    const replay = this.dispensingRecords.get(input.idempotencyKey);
+    const order = this.orders.get(input.orderId);
+    const item = this.orderItems.get(input.orderId)?.find((value) => value.id === input.orderItemId);
+    const reservation = this.inventoryReservations.get(input.reservationId);
+    if (replay && order && item && reservation) return { record: replay, order, item, reservation, idempotentReplay: true };
+    if (!order || !item || !reservation) throw new InvalidDispensingError('NOT_FOUND', 'Order item reservation not found');
+    if (['cancelled', 'partially_cancelled', 'fully_dispensed', 'delivered'].includes(order.status)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Order cannot be dispensed from its current state');
+    const batch = this.stockBatches.get(reservation.batchId);
+    const product = this.products.get(item.productId);
+    if (!batch || !product || batch.status !== 'active' || batch.expiryDate <= new Date()) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Stock batch is expired or blocked');
+    const remaining = reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased;
+    if (input.quantity <= 0 || input.quantity > remaining || input.quantity > batch.quantityReserved || input.quantity > batch.quantityOnHand) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Requested quantity exceeds eligible reserved stock');
+    const link = Array.from(this.prescriptionOrderItems.values()).find((value) => value.orderItemId === item.id);
+    if (product.prescriptionRequired || product.prescriptionRequirement !== 'none' || product.requiresPharmacistApproval) {
+      if (!link || !['approved', 'partially_approved'].includes(link.approvalStatus) || input.quantity > link.authorisedQuantity - link.dispensedQuantity) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Approved prescription quantity is required');
+    }
+    const orderSnapshot = { ...order };
+    const itemSnapshot = this.orderItems.get(order.id)!.map((value) => ({ ...value }));
+    const batchSnapshot = { ...batch };
+    const reservationSnapshot = { ...reservation };
+    const linkSnapshot = link ? { ...link } : undefined;
+    const movementCount = this.stockMovements.length;
+    try {
+    const updatedBatch = { ...batch, quantityOnHand: batch.quantityOnHand - input.quantity, quantityReserved: batch.quantityReserved - input.quantity, updatedAt: new Date() };
+    this.stockBatches.set(batch.id, updatedBatch);
+    const dispensed = reservation.quantityDispensed + input.quantity;
+    const updatedReservation = { ...reservation, quantityDispensed: dispensed, status: dispensed + reservation.quantityReleased === reservation.quantityReserved ? 'fully_dispensed' : 'partially_dispensed', version: reservation.version + 1, updatedAt: new Date() } as InventoryReservation;
+    this.inventoryReservations.set(reservation.id, updatedReservation);
+    const updatedItem = { ...item, quantityDispensed: item.quantityDispensed + input.quantity, status: item.quantityDispensed + input.quantity === item.quantity ? 'fulfilled' : 'partially_fulfilled' } as OrderItem;
+    this.orderItems.set(order.id, this.orderItems.get(order.id)!.map((value) => value.id === item.id ? updatedItem : value));
+    if (link) this.prescriptionOrderItems.set(link.id, { ...link, dispensedQuantity: link.dispensedQuantity + input.quantity, approvalStatus: link.dispensedQuantity + input.quantity === link.authorisedQuantity ? 'fully_consumed' : link.approvalStatus, version: link.version + 1, updatedAt: new Date() });
+    const updatedOrder = this.orderItems.get(order.id)!.every((value) => value.status === 'fulfilled') ? { ...order, status: 'fully_dispensed', updatedAt: new Date() } as Order : order;
+    this.orders.set(order.id, updatedOrder);
+    const record = { id: crypto.randomUUID(), branchId: order.branchId, orderId: order.id, orderItemId: item.id, prescriptionId: link?.prescriptionId ?? null, prescriptionOrderItemId: link?.id ?? null, reservationId: reservation.id, productId: item.productId, batchId: batch.id, quantity: input.quantity, dispensedBy: input.actorId, counsellingCompleted: input.counsellingCompleted, dispensingNote: input.notes ?? null, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId ?? null, dispensedAt: new Date() } as DispensingRecord;
+    this.dispensingRecords.set(input.idempotencyKey, record);
+    this.stockMovements.push({ id: crypto.randomUUID(), productId: item.productId, batchId: batch.id, branchId: order.branchId, orderId: order.id, orderItemId: item.id, reservationId: reservation.id, movementType: 'dispense', quantityDelta: -input.quantity, balanceAfter: updatedBatch.quantityOnHand - updatedBatch.quantityReserved, quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: updatedBatch.quantityOnHand, quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: updatedBatch.quantityReserved, reason: 'Dispensed against reserved customer order', performedBy: input.actorId, correlationId: input.correlationId ?? null, createdAt: new Date() });
+    await this.createAuditLog({ ...audit, entityId: record.id });
+    return { record, order: updatedOrder, item: updatedItem, reservation: updatedReservation, idempotentReplay: false };
+    } catch (error) {
+      this.orders.set(order.id, orderSnapshot);
+      this.orderItems.set(order.id, itemSnapshot);
+      this.stockBatches.set(batch.id, batchSnapshot);
+      this.inventoryReservations.set(reservation.id, reservationSnapshot);
+      if (linkSnapshot) this.prescriptionOrderItems.set(linkSnapshot.id, linkSnapshot);
+      this.dispensingRecords.delete(input.idempotencyKey);
+      this.stockMovements.length = movementCount;
+      throw error;
+    }
   }
 
   async cancelOrderWithAudit(input: { orderId: string; actorId: string; reasonCode: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<OrderCancellationResult> {

@@ -244,8 +244,8 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     method: 'PATCH',
     body: JSON.stringify({ status: 'dispensed' }),
   });
-  assert.equal(dispensing.status, 200);
-  assert.equal((await storage.getPrescription(pendingPrescription.id))?.status, 'dispensed');
+  assert.equal(dispensing.status, 409);
+  assert.equal((await storage.getPrescription(pendingPrescription.id))?.status, 'approved');
 
   const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
   assert.equal(forbiddenPermission.status, 403);

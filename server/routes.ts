@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storageManager";
-import { InsufficientStockError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
+import { InsufficientStockError, InvalidDispensingError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import { authenticateToken, requirePermission } from "./authMiddleware";
 import { canRoleAssign, hasPermission, HEALTHCARE_ROLES, normalizeHealthcareRole, PERMISSIONS } from "@shared/healthcareAccess";
 import { registerAuthRoutes } from "./auth-routes";
@@ -66,6 +66,7 @@ const orderCreateSchema = z.object({
     quantity: z.number().int().positive().max(1000),
   }).strict()).min(1).max(100),
   branchId: z.string(),
+  prescriptionId: z.string().optional(),
   deliveryAddress: z.string().max(500).optional(),
   deliveryCity: z.string().max(100).optional(),
   deliveryLatitude: z.coerce.number().min(-90).max(90).optional(),
@@ -80,6 +81,22 @@ const paymentInitiationSchema = z.object({
 const orderCancellationSchema = z.object({
   reasonCode: z.enum(['CUSTOMER_REQUEST', 'PRESCRIPTION_REJECTED', 'PAYMENT_FAILED', 'OPERATIONAL']),
   reason: z.string().trim().min(10).max(1000),
+}).strict();
+const prescriptionItemReviewSchema = z.object({
+  orderItemId: z.string(),
+  decision: z.enum(['approve', 'partially_approve', 'reject']),
+  authorisedQuantity: z.number().int().positive().max(10000).optional(),
+  substitutionAllowed: z.boolean().optional(),
+  clinicalNote: z.string().trim().min(10).max(2000).optional(),
+  rejectionReason: z.string().trim().min(10).max(1000).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.decision !== 'reject' && value.authorisedQuantity === undefined) context.addIssue({ code: 'custom', path: ['authorisedQuantity'], message: 'Authorised quantity is required' });
+  if (value.decision === 'reject' && !value.rejectionReason) context.addIssue({ code: 'custom', path: ['rejectionReason'], message: 'Rejection reason is required' });
+});
+const dispenseItemSchema = z.object({
+  reservationId: z.string(), quantity: z.number().int().positive().max(10000),
+  idempotencyKey: z.string().min(8).max(128), counsellingCompleted: z.boolean(),
+  notes: z.string().trim().max(2000).optional(),
 }).strict();
 
 const appointmentUpdateSchema = z.object({
@@ -143,6 +160,9 @@ const productCreateSchema = insertProductSchema.strict();
 const productUpdateSchema = productCreateSchema.partial().strict();
 const prescriptionCreateSchema = z.object({
   fileUrl: z.string().url().max(2000).nullable().optional(),
+  prescriberName: z.string().trim().min(2).max(255),
+  facilityName: z.string().trim().min(2).max(255),
+  expiresAt: z.coerce.date(),
   patientAllergies: z.array(z.string().max(200)).max(100).nullable().optional(),
   patientConditions: z.array(z.string().max(200)).max(100).nullable().optional(),
   prescribedMedications: z.array(z.object({
@@ -150,6 +170,7 @@ const prescriptionCreateSchema = z.object({
     dosage: z.string().max(200),
     frequency: z.string().max(200),
     duration: z.string().max(200),
+    quantity: z.number().int().positive().max(10000),
   }).strict()).max(100).optional(),
 }).strict();
 const prescriptionReviewSchema = z.object({
@@ -160,7 +181,7 @@ const prescriptionReviewSchema = z.object({
 const prescriptionStatusTransitions: Record<string, readonly string[]> = {
   pending: ['approved', 'rejected'],
   under_review: ['approved', 'rejected'],
-  approved: ['dispensed'],
+  approved: [],
   rejected: [],
   dispensed: [],
 };
@@ -664,17 +685,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/orders', authenticateToken, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const { items, branchId, deliveryAddress, deliveryCity, deliveryLatitude, deliveryLongitude, paymentMethod } = orderCreateSchema.parse(req.body);
+      const { items, branchId, prescriptionId, deliveryAddress, deliveryCity, deliveryLatitude, deliveryLongitude, paymentMethod } = orderCreateSchema.parse(req.body);
       
       // Calculate totals
       let subtotal = 0;
-      const orderLineItems: Array<{ productId: string; batchId?: string; quantity: number; unitPrice: string; subtotal: string }> = [];
+      const orderLineItems: Array<{ productId: string; batchId?: string; quantity: number; unitPrice: string; subtotal: string; prescriptionLink?: { prescriptionId: string; prescribedQuantity: number } }> = [];
+      const linkedPrescription = prescriptionId ? await getStorage().getPrescriptionForPatient(prescriptionId, userId) : undefined;
       for (const item of items) {
         const product = await getStorage().getProduct(item.productId);
         if (!product) return res.status(400).json({ message: "Unknown product" });
+        if (!product.onlineSaleAllowed || product.prescriptionRequirement === 'restricted_online') return res.status(409).json({ message: 'Product is restricted from online ordering', productId: product.id });
+        const requiresPrescription = product.prescriptionRequired || product.prescriptionRequirement !== 'none' || product.requiresPharmacistApproval;
+        let prescriptionLink: { prescriptionId: string; prescribedQuantity: number } | undefined;
+        if (requiresPrescription) {
+          if (!linkedPrescription) return res.status(409).json({ message: 'A patient-owned prescription is required for this product', productId: product.id });
+          if (linkedPrescription.revokedAt || ['revoked', 'cancelled', 'expired', 'rejected'].includes(linkedPrescription.status) || (linkedPrescription.expiresAt && linkedPrescription.expiresAt <= new Date())) return res.status(409).json({ message: 'Prescription is not valid', productId: product.id });
+          const medication = Array.isArray(linkedPrescription.prescribedMedications) ? (linkedPrescription.prescribedMedications as Array<{ productId?: string; quantity?: number }>).find((entry) => entry.productId === product.id) : undefined;
+          if (!medication?.quantity || item.quantity > medication.quantity) return res.status(409).json({ message: 'Product or quantity is not covered by the prescription', productId: product.id });
+          prescriptionLink = { prescriptionId: linkedPrescription.id, prescribedQuantity: medication.quantity };
+        }
         const lineSubtotal = parseFloat(product.price) * item.quantity;
         subtotal += lineSubtotal;
-        orderLineItems.push({ ...item, unitPrice: product.price, subtotal: lineSubtotal.toString() });
+        orderLineItems.push({ ...item, unitPrice: product.price, subtotal: lineSubtotal.toString(), prescriptionLink });
       }
       
       // Calculate delivery cost if delivery info provided
@@ -708,6 +740,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { order, items: createdItems } = await getStorage().createOrderWithItemsAndAudit({
         customerId: userId,
         branchId: branchId || 'default-branch-id',
+        prescriptionId,
         subtotal: subtotal.toString(),
         deliveryCharge: deliveryCharge.toString(),
         total: total.toString(),
@@ -728,6 +761,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Error creating order:", error);
       res.status(500).json({ message: "Failed to create order" });
+    }
+  });
+
+  app.post('/api/orders/:orderId/items/:orderItemId/dispense', authenticateToken, requirePermission(PERMISSIONS.DISPENSING_COMPLETE), async (req, res) => {
+    try {
+      const payload = dispenseItemSchema.parse(req.body);
+      const order = await getStorage().getOrder(req.params.orderId);
+      if (!order || (req.user!.branchId && order.branchId !== req.user!.branchId)) return res.status(404).json({ message: 'Order not found' });
+      const result = await getStorage().dispenseOrderItem({ ...payload, orderId: order.id, orderItemId: req.params.orderItemId, actorId: req.user!.id, correlationId: res.locals.requestId }, buildAuditEvent(req, {
+        action: 'dispensing.completed', entityType: 'dispensing_record',
+        changes: { orderId: order.id, orderItemId: req.params.orderItemId, reservationId: payload.reservationId, quantity: payload.quantity, counsellingCompleted: payload.counsellingCompleted, actorRole: req.user!.role },
+      }));
+      res.json({ success: true, idempotentReplay: result.idempotentReplay, dispensingRecordId: result.record.id, orderStatus: result.order.status, itemStatus: result.item.status, reservationStatus: result.reservation.status });
+    } catch (error) {
+      if (error instanceof InvalidDispensingError) return res.status(error.code === 'NOT_FOUND' ? 404 : 409).json({ message: error.message });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid dispensing request', issues: error.issues });
+      logger.error('Order item dispensing failed', { error });
+      res.status(500).json({ message: 'Failed to dispense order item' });
     }
   });
 
@@ -783,6 +834,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       logger.error('Order cancellation failed', { error, orderId: req.params.orderId });
       res.status(500).json({ message: 'Failed to cancel order' });
+    }
+  });
+
+  app.post('/api/prescriptions/:prescriptionId/review', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_REVIEW), async (req, res) => {
+    try {
+      const payload = prescriptionItemReviewSchema.parse(req.body);
+      const permission = payload.decision === 'reject' ? PERMISSIONS.PRESCRIPTION_REJECT : PERMISSIONS.PRESCRIPTION_APPROVE;
+      if (!hasPermission(req.user!.role, permission)) return res.status(403).json({ message: 'Prescription decision is not permitted' });
+      const link = await getStorage().getPrescriptionOrderItem(req.params.prescriptionId, payload.orderItemId);
+      if (!link) return res.status(404).json({ message: 'Prescription order-item linkage not found' });
+      const order = await getStorage().getOrder(link.orderId);
+      if (!order || (req.user!.branchId && order.branchId !== req.user!.branchId)) return res.status(404).json({ message: 'Prescription order-item linkage not found' });
+      const reviewed = await getStorage().reviewPrescriptionOrderItem({ ...payload, prescriptionId: req.params.prescriptionId, actorId: req.user!.id }, buildAuditEvent(req, {
+        action: `prescription.item.${payload.decision}`, entityType: 'prescription_order_item', entityId: link.id,
+        changes: { prescriptionId: req.params.prescriptionId, orderId: link.orderId, orderItemId: link.orderItemId, productId: link.productId, previousStatus: link.approvalStatus, authorisedQuantity: payload.authorisedQuantity, actorRole: req.user!.role },
+      }));
+      res.json(reviewed);
+    } catch (error) {
+      if (error instanceof InvalidDispensingError) return res.status(error.code === 'NOT_FOUND' ? 404 : 409).json({ message: error.message });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid prescription review request', issues: error.issues });
+      logger.error('Prescription item review failed', { error });
+      res.status(500).json({ message: 'Failed to review prescription item' });
     }
   });
 

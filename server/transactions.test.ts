@@ -288,6 +288,66 @@ test('cancelling a partially dispensed order releases only the unfulfilled reser
   assert.equal((await storage.getReservationsByOrder(created.order.id))[0].quantityDispensed, 1);
 });
 
+test('prescription approval gates partial and full dispensing with idempotent stock transitions', async () => {
+  const storage = new MemoryStorage();
+  const product = await storage.createProduct({ sku: 'RX-1', name: 'Prescription medicine', price: '10', prescriptionRequired: true, prescriptionRequirement: 'prescription_required', requiresPharmacistApproval: true });
+  const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending', expiresAt: new Date('2030-01-01T00:00:00.000Z'), prescribedMedications: [{ productId: product.id, quantity: 4 }] });
+  const batch = await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'RX-BATCH', quantityOnHand: 5, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit(
+    { customerId: 'patient-a', branchId: 'branch-a', prescriptionId: prescription.id, subtotal: '40', total: '40' },
+    [{ productId: product.id, quantity: 4, unitPrice: '10', subtotal: '40', prescriptionLink: { prescriptionId: prescription.id, prescribedQuantity: 4 } }], audit('order.created'),
+  );
+  const item = created.items[0];
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  await assert.rejects(storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: item.id, reservationId: reservation.id, quantity: 1, actorId: 'pharmacist-a', idempotencyKey: 'dispense-before-approval', counsellingCompleted: true }, audit('dispensing.completed')), /Approved prescription/);
+  const link = await storage.reviewPrescriptionOrderItem({ prescriptionId: prescription.id, orderItemId: item.id, actorId: 'pharmacist-a', decision: 'approve', authorisedQuantity: 4 }, audit('prescription.item.approve'));
+  assert.equal(link.authorisedQuantity, 4);
+  const first = await storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: item.id, reservationId: reservation.id, quantity: 2, actorId: 'pharmacist-a', idempotencyKey: 'dispense-partial-001', counsellingCompleted: true }, audit('dispensing.completed'));
+  assert.equal(first.item.status, 'partially_fulfilled');
+  assert.equal(first.reservation.status, 'partially_dispensed');
+  const replay = await storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: item.id, reservationId: reservation.id, quantity: 2, actorId: 'pharmacist-a', idempotencyKey: 'dispense-partial-001', counsellingCompleted: true }, audit('dispensing.completed'));
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal((await storage.getStockBatchesByProduct(product.id))[0].quantityOnHand, 3);
+  const final = await storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: item.id, reservationId: reservation.id, quantity: 2, actorId: 'pharmacist-a', idempotencyKey: 'dispense-final-002', counsellingCompleted: true }, audit('dispensing.completed'));
+  assert.equal(final.order.status, 'fully_dispensed');
+  assert.equal(final.item.status, 'fulfilled');
+  assert.equal((await storage.getStockBatchesByProduct(product.id))[0].quantityOnHand, 1);
+  assert.equal((await storage.getStockBatchesByProduct(product.id))[0].quantityReserved, 0);
+  assert.equal((await storage.getStockMovements({ batchId: batch.id })).filter((movement) => movement.movementType === 'dispense').length, 2);
+});
+
+test('prescription quantity and blocked-batch controls reject unsafe dispensing', async () => {
+  const storage = new MemoryStorage();
+  const product = await storage.createProduct({ sku: 'RX-2', name: 'Controlled medicine', price: '10', prescriptionRequired: true, prescriptionRequirement: 'controlled_medicine', requiresPharmacistApproval: true, controlledMedicine: true });
+  const prescription = await storage.createPrescription({ patientId: 'patient-a', status: 'pending', expiresAt: new Date('2030-01-01T00:00:00.000Z') });
+  await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'RX-2-BATCH', quantityOnHand: 3, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit({ customerId: 'patient-a', branchId: 'branch-a', prescriptionId: prescription.id, subtotal: '30', total: '30' }, [{ productId: product.id, quantity: 3, unitPrice: '10', subtotal: '30', prescriptionLink: { prescriptionId: prescription.id, prescribedQuantity: 3 } }], audit('order.created'));
+  const item = created.items[0];
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  await assert.rejects(storage.reviewPrescriptionOrderItem({ prescriptionId: prescription.id, orderItemId: item.id, actorId: 'pharmacist-a', decision: 'approve', authorisedQuantity: 4 }, audit('prescription.item.approve')), /exceeds/);
+  await storage.reviewPrescriptionOrderItem({ prescriptionId: prescription.id, orderItemId: item.id, actorId: 'pharmacist-a', decision: 'partially_approve', authorisedQuantity: 2 }, audit('prescription.item.partially_approve'));
+  await assert.rejects(storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: item.id, reservationId: reservation.id, quantity: 3, actorId: 'pharmacist-a', idempotencyKey: 'dispense-over-authorised', counsellingCompleted: true }, audit('dispensing.completed')), /prescription quantity/);
+  const batch = (await storage.getStockBatchesByProduct(product.id))[0];
+  await storage.updateStockBatch(batch.id, { status: 'quarantined' });
+  await assert.rejects(storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: item.id, reservationId: reservation.id, quantity: 1, actorId: 'pharmacist-a', idempotencyKey: 'dispense-quarantined', counsellingCompleted: true }, audit('dispensing.completed')), /expired or blocked/);
+});
+
+test('dispensing audit failure rolls back stock, reservation, item, and dispensing evidence', async () => {
+  const storage = new FailingAuditStorage();
+  storage.failAudit = false;
+  const product = await storage.createProduct({ sku: 'OTC-ROLLBACK', name: 'Rollback medicine', price: '10' });
+  await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'ROLLBACK', quantityOnHand: 2, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit({ customerId: 'patient-a', branchId: 'branch-a', subtotal: '20', total: '20' }, [{ productId: product.id, quantity: 2, unitPrice: '10', subtotal: '20' }], audit('order.created'));
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  storage.failAudit = true;
+  await assert.rejects(storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: created.items[0].id, reservationId: reservation.id, quantity: 1, actorId: 'pharmacist-a', idempotencyKey: 'dispense-rollback-001', counsellingCompleted: true }, audit('dispensing.completed')), /deliberate audit failure/);
+  assert.equal((await storage.getStockBatchesByProduct(product.id))[0].quantityOnHand, 2);
+  assert.equal((await storage.getStockBatchesByProduct(product.id))[0].quantityReserved, 2);
+  assert.equal((await storage.getReservationsByOrder(created.order.id))[0].quantityDispensed, 0);
+  assert.equal((await storage.getOrderItems(created.order.id))[0].quantityDispensed, 0);
+  assert.equal((await storage.getStockMovements()).filter((movement) => movement.movementType === 'dispense').length, 0);
+});
+
 test('emergency-access activation fails when its audit insert fails', async () => {
   const storage = new FailingAuditStorage();
   await assert.rejects(

@@ -18,3 +18,10 @@ export class InvalidOrderCancellationError extends Error {
     this.name = 'InvalidOrderCancellationError';
   }
 }
+
+export class InvalidDispensingError extends Error {
+  constructor(public readonly code: 'NOT_FOUND' | 'NOT_ELIGIBLE' | 'IDEMPOTENCY_CONFLICT', message: string) {
+    super(message);
+    this.name = 'InvalidDispensingError';
+  }
+}

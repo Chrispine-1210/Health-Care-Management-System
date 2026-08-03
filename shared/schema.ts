@@ -34,7 +34,7 @@ export const userRoleEnum = pgEnum('user_role', [
 export const accountStatusEnum = pgEnum('account_status', ['active', 'disabled', 'locked']);
 export const emergencyReasonEnum = pgEnum('emergency_reason', ['immediate_threat', 'continuity_of_care', 'system_outage']);
 export const emergencyReviewStateEnum = pgEnum('emergency_review_state', ['pending', 'approved', 'rejected', 'closed']);
-export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed']);
+export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed', 'partially_dispensed', 'fully_dispensed', 'expired', 'revoked', 'cancelled']);
 export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'partially_cancelled', 'fully_dispensed', 'cancelled']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'processing', 'completed', 'failed', 'refunded']);
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'airtel_money', 'tnm_mpamba', 'card', 'bank_transfer']);
@@ -44,6 +44,9 @@ export const contentStatusEnum = pgEnum('content_status', ['draft', 'published',
 export const stockBatchStatusEnum = pgEnum('stock_batch_status', ['active', 'quarantined', 'recalled', 'expired', 'damaged', 'returned', 'destroyed']);
 export const stockMovementTypeEnum = pgEnum('stock_movement_type', ['receipt', 'reservation', 'release', 'dispense', 'adjustment', 'transfer_in', 'transfer_out', 'return', 'quarantine', 'destruction']);
 export const reservationStatusEnum = pgEnum('reservation_status', ['active', 'partially_dispensed', 'fully_dispensed', 'partially_released', 'released', 'expired', 'cancelled']);
+export const prescriptionRequirementEnum = pgEnum('prescription_requirement', ['none', 'prescription_required', 'pharmacist_review', 'restricted_online', 'controlled_medicine']);
+export const prescriptionItemStatusEnum = pgEnum('prescription_item_status', ['pending', 'under_review', 'approved', 'partially_approved', 'rejected', 'expired', 'revoked', 'fully_consumed']);
+export const orderItemStatusEnum = pgEnum('order_item_status', ['reserved', 'partially_fulfilled', 'fulfilled', 'cancelled']);
 
 // ============================================================================
 // SESSION TABLE (Required for Replit Auth)
@@ -148,6 +151,14 @@ export const products = pgTable("products", {
   dosageForm: varchar("dosage_form", { length: 100 }), // tablet, capsule, syrup, etc.
   strength: varchar("strength", { length: 100 }), // e.g., "500mg"
   prescriptionRequired: boolean("prescription_required").notNull().default(false),
+  prescriptionRequirement: prescriptionRequirementEnum("prescription_requirement").notNull().default('none'),
+  requiresPharmacistApproval: boolean("requires_pharmacist_approval").notNull().default(false),
+  onlineSaleAllowed: boolean("online_sale_allowed").notNull().default(true),
+  controlledMedicine: boolean("controlled_medicine").notNull().default(false),
+  maximumDispensingQuantity: integer("maximum_dispensing_quantity"),
+  prescriptionValidityDays: integer("prescription_validity_days").notNull().default(30),
+  allowPartialDispensing: boolean("allow_partial_dispensing").notNull().default(true),
+  allowGenericSubstitution: boolean("allow_generic_substitution").notNull().default(false),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   imageUrl: text("image_url"),
   storageConditions: text("storage_conditions"),
@@ -269,6 +280,12 @@ export const prescriptions = pgTable("prescriptions", {
   reviewedBy: varchar("reviewed_by"),
   reviewNotes: text("review_notes"),
   reviewedAt: timestamp("reviewed_at"),
+  expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: varchar("revoked_by"),
+  revocationReason: text("revocation_reason"),
+  prescriberName: varchar("prescriber_name", { length: 255 }),
+  facilityName: varchar("facility_name", { length: 255 }),
   // Patient medical context
   patientAllergies: text("patient_allergies").array(),
   patientConditions: text("patient_conditions").array(),
@@ -377,6 +394,8 @@ export const orderItems = pgTable("order_items", {
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  quantityDispensed: integer("quantity_dispensed").notNull().default(0),
+  status: orderItemStatusEnum("status").notNull().default('reserved'),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -423,6 +442,44 @@ export const inventoryReservations = pgTable("inventory_reservations", {
 ]);
 
 export type InventoryReservation = typeof inventoryReservations.$inferSelect;
+
+export const prescriptionOrderItems = pgTable("prescription_order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull(),
+  prescriptionId: varchar("prescription_id").notNull(),
+  orderId: varchar("order_id").notNull(),
+  orderItemId: varchar("order_item_id").notNull().unique(),
+  productId: varchar("product_id").notNull(),
+  prescribedQuantity: integer("prescribed_quantity").notNull(),
+  authorisedQuantity: integer("authorised_quantity").notNull().default(0),
+  dispensedQuantity: integer("dispensed_quantity").notNull().default(0),
+  approvalStatus: prescriptionItemStatusEnum("approval_status").notNull().default('pending'),
+  substitutionAllowed: boolean("substitution_allowed").notNull().default(false),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  rejectionReason: text("rejection_reason"),
+  clinicalNote: text("clinical_note"),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_prescription_order_items_prescription").on(table.prescriptionId),
+  index("idx_prescription_order_items_order").on(table.orderId),
+]);
+export type PrescriptionOrderItem = typeof prescriptionOrderItems.$inferSelect;
+
+export const dispensingRecords = pgTable("dispensing_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull(), orderId: varchar("order_id").notNull(),
+  orderItemId: varchar("order_item_id").notNull(), prescriptionId: varchar("prescription_id"),
+  prescriptionOrderItemId: varchar("prescription_order_item_id"), reservationId: varchar("reservation_id").notNull(),
+  productId: varchar("product_id").notNull(), batchId: varchar("batch_id").notNull(),
+  quantity: integer("quantity").notNull(), dispensedBy: varchar("dispensed_by").notNull(),
+  counsellingCompleted: boolean("counselling_completed").notNull().default(false), dispensingNote: text("dispensing_note"),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull().unique(), correlationId: varchar("correlation_id", { length: 100 }),
+  dispensedAt: timestamp("dispensed_at").notNull().defaultNow(),
+});
+export type DispensingRecord = typeof dispensingRecords.$inferSelect;
 
 // ============================================================================
 // DELIVERIES
