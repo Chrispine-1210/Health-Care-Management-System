@@ -17,10 +17,12 @@ export async function loginUser(email: string, password: string) {
 }
 
 export async function logoutUser() {
-  removeToken();
+  const token = getToken();
   try {
-    await fetch('/api/logout', { method: 'POST' });
+    if (token) await fetch('/api/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
   } catch (e) {
     console.error('Logout error:', e);
+  } finally {
+    removeToken();
   }
 }

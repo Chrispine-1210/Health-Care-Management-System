@@ -140,6 +140,18 @@ export function registerAuthRoutes(app: Express) {
     }
   });
 
+  // Compatibility endpoint retained for existing clients while enforcing the
+  // same authenticated server-side session revocation as the canonical route.
+  app.post('/api/logout', authenticateToken, (req, res) => {
+    try {
+      authService.logout(req.user!.id);
+      res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+      logger.error('Logout error', { error });
+      res.status(500).json({ success: false, message: 'Logout failed' });
+    }
+  });
+
   /**
    * GET /api/auth/me
    * Get current user info

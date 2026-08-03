@@ -256,5 +256,12 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(disabledUser.status, 401);
   assert.equal((await disabledUser.json() as { message: string }).message, 'Invalid or expired token');
 
+  const unauthenticatedLogout = await request('/api/logout', undefined, { method: 'POST' });
+  assert.equal(unauthenticatedLogout.status, 401);
+  const logout = await request('/api/logout', patientA.token, { method: 'POST' });
+  assert.equal(logout.status, 200);
+  const revokedSession = await request('/api/orders', patientA.token);
+  assert.equal(revokedSession.status, 401);
+
   server.closeIdleConnections();
 });

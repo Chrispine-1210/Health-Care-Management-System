@@ -19,11 +19,15 @@ export function useAuth() {
   const isAuthenticated = !!token && !!user;
 
   const signOut = useCallback(async () => {
-    localStorage.removeItem("auth_token");
+    const currentToken = localStorage.getItem("auth_token");
     try {
-      await fetch("/api/logout", { method: "POST" });
+      if (currentToken) {
+        await fetch("/api/logout", { method: "POST", headers: { Authorization: `Bearer ${currentToken}` } });
+      }
     } catch (e) {
       console.error("Logout error:", e);
+    } finally {
+      localStorage.removeItem("auth_token");
     }
     window.location.href = "/";
   }, []);
