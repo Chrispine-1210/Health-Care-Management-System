@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 export default function SignupNew() {
   const [formData, setFormData] = useState({
@@ -23,26 +24,14 @@ export default function SignupNew() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (!res.ok) {
-        throw new Error("Signup failed");
-      }
-
-      const { token } = await res.json();
-      localStorage.setItem("auth_token", token);
+      await apiRequest("POST", "/api/auth/register", formData);
       
       toast({
         title: "Success",
-        description: "Account created successfully",
+        description: "Account created. Sign in with your credentials.",
       });
       
-      navigate("/");
-      window.location.reload();
+      navigate("/login");
     } catch (error) {
       toast({
         title: "Error",
@@ -102,9 +91,8 @@ export default function SignupNew() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="customer">Customer</SelectItem>
-                <SelectItem value="staff">Staff</SelectItem>
-                <SelectItem value="driver">Driver</SelectItem>
+                <SelectItem value="customer">Patient</SelectItem>
+                <SelectItem value="driver">Delivery driver</SelectItem>
               </SelectContent>
             </Select>
             <Button type="submit" disabled={loading} className="w-full" data-testid="button-signup">

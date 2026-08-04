@@ -1,14 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
-import { getQueryFn } from "@/lib/queryClient";
+import { resolveApiUrl } from "@/lib/queryClient";
 import { useCallback } from "react";
+import { clearAuthenticatedSession, getAuthToken, getAuthUserQueryKey } from "@/lib/authSession";
 
 export function useAuth() {
-  const token = localStorage.getItem("auth_token");
+  const token = getAuthToken();
 
   const { data: user, isLoading } = useQuery<User | null>({
-    queryKey: ["/api/auth/user"],
-    queryFn: getQueryFn({ on401: "returnNull" }),
+    queryKey: getAuthUserQueryKey(token),
+    queryFn: async () => {
+      const response = await fetch(resolveApiUrl("/api/auth/me"), { headers: { Authorization: `Bearer ${token}` } });
+      if (response.status === 401) return null;
+      if (!response.ok) throw new Error(`Authentication check failed: ${response.status}`);
+      return ((await response.json()) as { data: User }).data;
+    },
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
@@ -27,7 +33,7 @@ export function useAuth() {
     } catch (e) {
       console.error("Logout error:", e);
     } finally {
-      localStorage.removeItem("auth_token");
+      clearAuthenticatedSession();
     }
     window.location.href = "/";
   }, []);

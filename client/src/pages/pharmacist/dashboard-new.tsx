@@ -51,7 +51,7 @@ export default function PharmacistDashboardNew() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
     }
   }, [isAuthenticated, isPharmacist, authLoading, toast]);

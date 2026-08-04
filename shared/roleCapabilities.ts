@@ -3,7 +3,7 @@ export const PLATFORM_ROLES = ['customer', 'driver', 'pharmacist', 'staff', 'adm
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
 
 const DEFAULT_ROUTES: Record<PlatformRole, string> = {
-  customer: '/customer',
+  customer: '/',
   driver: '/driver',
   pharmacist: '/pharmacist',
   staff: '/staff',
@@ -11,5 +11,10 @@ const DEFAULT_ROUTES: Record<PlatformRole, string> = {
 };
 
 export function getDefaultRouteForRole(role?: string | null): string {
-  return role && role in DEFAULT_ROUTES ? DEFAULT_ROUTES[role as PlatformRole] : '/';
+  const normalized: Record<string, PlatformRole> = {
+    patient: 'customer', delivery_driver: 'driver', receptionist: 'staff',
+    branch_administrator: 'admin', system_administrator: 'admin', super_administrator: 'admin',
+  };
+  const platformRole = role ? normalized[role] ?? role : undefined;
+  return platformRole && platformRole in DEFAULT_ROUTES ? DEFAULT_ROUTES[platformRole as PlatformRole] : '/';
 }

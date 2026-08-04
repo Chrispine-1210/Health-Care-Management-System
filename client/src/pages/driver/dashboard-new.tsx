@@ -49,7 +49,7 @@ export default function DriverDashboardNew() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
     }
   }, [isAuthenticated, isDriver, authLoading, toast]);

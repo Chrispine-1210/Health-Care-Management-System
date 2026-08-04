@@ -1,6 +1,13 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { resolveApiUrl } from "./lib/queryClient";
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const resolvedInput = typeof input === "string" ? resolveApiUrl(input) : input;
+  return nativeFetch(resolvedInput, init);
+};
 
 // Register service worker for offline support and PWA
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

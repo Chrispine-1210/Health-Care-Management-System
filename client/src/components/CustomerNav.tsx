@@ -122,7 +122,7 @@ export function CustomerNav() {
               </DropdownMenu>
             ) : (
               <Button asChild data-testid="button-login">
-                <a href="/api/login">Login</a>
+                <a href="/login">Login</a>
               </Button>
             )}
           </div>

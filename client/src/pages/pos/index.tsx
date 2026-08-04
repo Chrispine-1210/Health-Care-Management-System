@@ -43,7 +43,7 @@ export default function POSPage() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
     }
   }, [isAuthenticated, isStaff, isPharmacist, isAdmin, authLoading, toast]);
