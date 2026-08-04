@@ -8,6 +8,7 @@ neonConfig.webSocketConstructor = ws;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 
 try {
+  await pool.query("SELECT pg_advisory_lock(hashtext('thandizo_app_migrations'))");
   await pool.query('CREATE TABLE IF NOT EXISTS app_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
   const applied = new Set((await pool.query('SELECT name FROM app_migrations')).rows.map((row) => row.name));
   const files = (await readdir('migrations')).filter((name) => name.endsWith('.sql')).sort();
@@ -28,5 +29,6 @@ try {
     }
   }
 } finally {
+  await pool.query("SELECT pg_advisory_unlock(hashtext('thandizo_app_migrations'))").catch(() => undefined);
   await pool.end();
 }
