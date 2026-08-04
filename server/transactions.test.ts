@@ -409,6 +409,47 @@ test('concurrent prescription revocation and dispensing produce one valid stock 
   assert.equal((await storage.getStockMovements()).filter((movement) => ['release', 'dispense'].includes(movement.movementType)).length, 1);
 });
 
+test('batch substitution atomically moves remaining reservations and is idempotent', async () => {
+  const storage = new MemoryStorage();
+  const product = await storage.createProduct({ sku: 'SUB-1', name: 'Substitutable medicine', price: '10' });
+  const original = await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'ORIGINAL', quantityOnHand: 3, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const substitute = await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'SUBSTITUTE', quantityOnHand: 5, expiryDate: new Date('2031-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit({ customerId: 'patient-a', branchId: 'branch-a', subtotal: '20', total: '20' }, [{ productId: product.id, batchId: original.id, quantity: 2, unitPrice: '10', subtotal: '20' }], audit('order.created'));
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  const input = { orderId: created.order.id, orderItemId: created.items[0].id, reservationId: reservation.id, substituteBatchId: substitute.id, actorId: 'pharmacist-a', reason: 'Original batch packaging integrity requires replacement before dispensing.', idempotencyKey: 'substitution-request-001' };
+  const result = await storage.substituteReservationBatch(input, audit('inventory.batch_substituted'));
+  assert.equal(result.substitution.quantity, 2);
+  assert.equal(result.originalReservation.status, 'released');
+  assert.equal(result.substituteReservation.quantityReserved, 2);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).find((batch) => batch.id === original.id)?.quantityReserved, 0);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).find((batch) => batch.id === substitute.id)?.quantityReserved, 2);
+  assert.equal((await storage.getOrderItems(created.order.id))[0].batchId, substitute.id);
+  assert.equal((await storage.getStockMovements()).filter((movement) => ['release', 'reservation'].includes(movement.movementType)).length, 3);
+  const replay = await storage.substituteReservationBatch(input, audit('inventory.batch_substituted'));
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal((await storage.getReservationsByOrder(created.order.id)).length, 2);
+});
+
+test('batch substitution rejects unrelated batches and rolls back when audit insertion fails', async () => {
+  const storage = new FailingAuditStorage();
+  storage.failAudit = false;
+  const product = await storage.createProduct({ sku: 'SUB-2', name: 'Original medicine', price: '10' });
+  const otherProduct = await storage.createProduct({ sku: 'SUB-OTHER', name: 'Different medicine', price: '10' });
+  const original = await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'ORIGINAL-2', quantityOnHand: 2, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const valid = await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'VALID-2', quantityOnHand: 2, expiryDate: new Date('2031-01-01T00:00:00.000Z'), costPrice: '5' });
+  const unrelated = await storage.createStockBatch({ productId: otherProduct.id, branchId: 'branch-a', batchNumber: 'UNRELATED', quantityOnHand: 2, expiryDate: new Date('2031-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit({ customerId: 'patient-a', branchId: 'branch-a', subtotal: '20', total: '20' }, [{ productId: product.id, batchId: original.id, quantity: 2, unitPrice: '10', subtotal: '20' }], audit('order.created'));
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  const base = { orderId: created.order.id, orderItemId: created.items[0].id, reservationId: reservation.id, actorId: 'pharmacist-a', reason: 'Original batch packaging integrity requires replacement before dispensing.' };
+  await assert.rejects(storage.substituteReservationBatch({ ...base, substituteBatchId: unrelated.id, idempotencyKey: 'substitution-unrelated' }, audit('inventory.batch_substituted')), /same product/);
+  storage.failAudit = true;
+  await assert.rejects(storage.substituteReservationBatch({ ...base, substituteBatchId: valid.id, idempotencyKey: 'substitution-rollback' }, audit('inventory.batch_substituted')), /deliberate audit failure/);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).find((batch) => batch.id === original.id)?.quantityReserved, 2);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).find((batch) => batch.id === valid.id)?.quantityReserved, 0);
+  assert.equal((await storage.getReservationsByOrder(created.order.id)).length, 1);
+  assert.equal((await storage.getOrderItems(created.order.id))[0].batchId, original.id);
+});
+
 test('emergency-access activation fails when its audit insert fails', async () => {
   const storage = new FailingAuditStorage();
   await assert.rejects(

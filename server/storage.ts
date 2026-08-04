@@ -7,6 +7,7 @@ import {
   inventoryReservations,
   prescriptionOrderItems,
   dispensingRecords,
+  batchSubstitutions,
   orders,
   orderItems,
   prescriptions,
@@ -27,6 +28,7 @@ import {
   type InventoryReservation,
   type PrescriptionOrderItem,
   type DispensingRecord,
+  type BatchSubstitution,
   type Order,
   type InsertOrder,
   type OrderItem,
@@ -63,6 +65,7 @@ export interface OrderCancellationResult {
 export type OrderLineInput = Omit<InsertOrderItem, 'orderId'> & { prescriptionLink?: { prescriptionId: string; prescribedQuantity: number } };
 export interface DispensingResult { record: DispensingRecord; order: Order; item: OrderItem; reservation: InventoryReservation; idempotentReplay: boolean; }
 export interface PrescriptionRevocationResult { prescription: Prescription; releasedReservations: ReleasedReservation[]; }
+export interface BatchSubstitutionResult { substitution: BatchSubstitution; originalReservation: InventoryReservation; substituteReservation: InventoryReservation; idempotentReplay: boolean; }
 
 export interface IStorage {
   // User operations (required for Replit Auth)
@@ -120,6 +123,7 @@ export interface IStorage {
   getPrescriptionOrderItems(prescriptionId: string): Promise<PrescriptionOrderItem[]>;
   reviewPrescriptionOrderItem(input: { prescriptionId: string; orderItemId: string; actorId: string; decision: 'approve' | 'partially_approve' | 'reject'; authorisedQuantity?: number; substitutionAllowed?: boolean; clinicalNote?: string; rejectionReason?: string }, audit: InsertAuditLog): Promise<PrescriptionOrderItem>;
   revokePrescriptionWithAudit(input: { prescriptionId: string; actorId: string; reason: string; correlationId?: string }, audit: InsertAuditLog): Promise<PrescriptionRevocationResult>;
+  substituteReservationBatch(input: { orderId: string; orderItemId: string; reservationId: string; substituteBatchId: string; actorId: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<BatchSubstitutionResult>;
   dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; controlledMedicineAuthorized?: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult>;
 
   // Order Item operations
@@ -656,6 +660,55 @@ export class DatabaseStorage implements IStorage {
         changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), releasedReservations },
       });
       return { prescription: revoked, releasedReservations };
+    });
+  }
+
+  async substituteReservationBatch(input: { orderId: string; orderItemId: string; reservationId: string; substituteBatchId: string; actorId: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<BatchSubstitutionResult> {
+    return db.transaction(async (tx) => {
+      const [order] = await tx.select().from(orders).where(eq(orders.id, input.orderId)).for('update');
+      if (!order) throw new InvalidDispensingError('NOT_FOUND', 'Order not found');
+      const [existing] = await tx.select().from(batchSubstitutions).where(eq(batchSubstitutions.idempotencyKey, input.idempotencyKey));
+      if (existing) {
+        if (existing.orderId !== input.orderId || existing.orderItemId !== input.orderItemId || existing.substituteBatchId !== input.substituteBatchId) throw new InvalidDispensingError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for another batch substitution');
+        const [originalReservation] = await tx.select().from(inventoryReservations).where(eq(inventoryReservations.id, existing.originalReservationId));
+        const [substituteReservation] = await tx.select().from(inventoryReservations).where(eq(inventoryReservations.id, existing.substituteReservationId));
+        return { substitution: existing, originalReservation, substituteReservation, idempotentReplay: true };
+      }
+      if (['cancelled', 'partially_cancelled', 'fully_dispensed', 'delivered'].includes(order.status)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Order cannot change reservation batches from its current state');
+      const [item] = await tx.select().from(orderItems).where(and(eq(orderItems.id, input.orderItemId), eq(orderItems.orderId, order.id))).for('update');
+      await tx.select({ id: prescriptionOrderItems.id }).from(prescriptionOrderItems).where(eq(prescriptionOrderItems.orderItemId, input.orderItemId)).for('update');
+      const [reservation] = await tx.select().from(inventoryReservations).where(and(eq(inventoryReservations.id, input.reservationId), eq(inventoryReservations.orderItemId, input.orderItemId))).for('update');
+      if (!item || !reservation) throw new InvalidDispensingError('NOT_FOUND', 'Order item reservation not found');
+      if (!['active', 'partially_dispensed'].includes(reservation.status)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reservation cannot be substituted from its current state');
+      if (reservation.batchId === input.substituteBatchId) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch must differ from the current batch');
+      const remaining = reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased;
+      if (remaining <= 0) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reservation has no remaining quantity to substitute');
+      const batchIds = [reservation.batchId, input.substituteBatchId].sort();
+      const lockedBatches = [];
+      for (const batchId of batchIds) {
+        const [batch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, batchId)).for('update');
+        if (batch) lockedBatches.push(batch);
+      }
+      const originalBatch = lockedBatches.find((batch) => batch.id === reservation.batchId);
+      const substituteBatch = lockedBatches.find((batch) => batch.id === input.substituteBatchId);
+      if (!originalBatch || !substituteBatch) throw new InvalidDispensingError('NOT_FOUND', 'Stock batch not found');
+      if (substituteBatch.productId !== item.productId || substituteBatch.branchId !== order.branchId) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch must contain the same product in the same branch');
+      if (substituteBatch.status !== 'active' || substituteBatch.expiryDate <= new Date()) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch is expired or blocked');
+      if (originalBatch.quantityReserved < remaining || substituteBatch.quantityOnHand - substituteBatch.quantityReserved < remaining) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch does not have sufficient available stock');
+      const [updatedOriginalBatch] = await tx.update(stockBatches).set({ quantityReserved: sql`${stockBatches.quantityReserved} - ${remaining}`, updatedAt: new Date() }).where(and(eq(stockBatches.id, originalBatch.id), gte(stockBatches.quantityReserved, remaining))).returning();
+      const [updatedSubstituteBatch] = await tx.update(stockBatches).set({ quantityReserved: sql`${stockBatches.quantityReserved} + ${remaining}`, updatedAt: new Date() }).where(and(eq(stockBatches.id, substituteBatch.id), eq(stockBatches.status, 'active'), gt(stockBatches.expiryDate, new Date()), gte(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, remaining))).returning();
+      if (!updatedOriginalBatch || !updatedSubstituteBatch) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Concurrent stock mutation prevented batch substitution');
+      const [updatedOriginalReservation] = await tx.update(inventoryReservations).set({ quantityReleased: reservation.quantityReleased + remaining, status: reservation.quantityDispensed > 0 ? 'partially_released' : 'released', version: reservation.version + 1, updatedAt: new Date() }).where(and(eq(inventoryReservations.id, reservation.id), eq(inventoryReservations.version, reservation.version))).returning();
+      if (!updatedOriginalReservation) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Concurrent reservation mutation prevented batch substitution');
+      const [substituteReservation] = await tx.insert(inventoryReservations).values({ orderId: order.id, orderItemId: item.id, productId: item.productId, batchId: substituteBatch.id, branchId: order.branchId, quantityReserved: remaining }).returning();
+      await tx.update(orderItems).set({ batchId: substituteBatch.id }).where(eq(orderItems.id, item.id));
+      await tx.insert(stockMovements).values([
+        { productId: item.productId, batchId: originalBatch.id, branchId: order.branchId, orderId: order.id, orderItemId: item.id, reservationId: reservation.id, movementType: 'release', quantityDelta: remaining, balanceAfter: updatedOriginalBatch.quantityOnHand - updatedOriginalBatch.quantityReserved, quantityOnHandBefore: originalBatch.quantityOnHand, quantityOnHandAfter: updatedOriginalBatch.quantityOnHand, quantityReservedBefore: originalBatch.quantityReserved, quantityReservedAfter: updatedOriginalBatch.quantityReserved, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId },
+        { productId: item.productId, batchId: substituteBatch.id, branchId: order.branchId, orderId: order.id, orderItemId: item.id, reservationId: substituteReservation.id, movementType: 'reservation', quantityDelta: -remaining, balanceAfter: updatedSubstituteBatch.quantityOnHand - updatedSubstituteBatch.quantityReserved, quantityOnHandBefore: substituteBatch.quantityOnHand, quantityOnHandAfter: updatedSubstituteBatch.quantityOnHand, quantityReservedBefore: substituteBatch.quantityReserved, quantityReservedAfter: updatedSubstituteBatch.quantityReserved, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId },
+      ]);
+      const [substitution] = await tx.insert(batchSubstitutions).values({ branchId: order.branchId, orderId: order.id, orderItemId: item.id, originalReservationId: reservation.id, substituteReservationId: substituteReservation.id, originalBatchId: originalBatch.id, substituteBatchId: substituteBatch.id, quantity: remaining, reason: input.reason, performedBy: input.actorId, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId }).returning();
+      await tx.insert(auditLogs).values({ ...audit, entityId: substitution.id, changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), quantity: remaining, originalBatchId: originalBatch.id, substituteBatchId: substituteBatch.id, originalReservationId: reservation.id, substituteReservationId: substituteReservation.id } });
+      return { substitution, originalReservation: updatedOriginalReservation, substituteReservation, idempotentReplay: false };
     });
   }
 

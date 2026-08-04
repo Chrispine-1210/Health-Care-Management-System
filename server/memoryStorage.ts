@@ -1,10 +1,10 @@
 import type { IStorage } from "./storage";
-import type { DispensingResult, OrderCancellationResult, OrderLineInput, PrescriptionRevocationResult, ReleasedReservation } from "./storage";
+import type { BatchSubstitutionResult, DispensingResult, OrderCancellationResult, OrderLineInput, PrescriptionRevocationResult, ReleasedReservation } from "./storage";
 import { InsufficientStockError, InvalidDispensingError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
   StockBatch, InsertStockBatch, StockMovement, InventoryReservation, Order, InsertOrder, OrderItem, InsertOrderItem,
-  Prescription, InsertPrescription, PrescriptionOrderItem, DispensingRecord, Delivery, InsertDelivery,
+  Prescription, InsertPrescription, PrescriptionOrderItem, DispensingRecord, BatchSubstitution, Delivery, InsertDelivery,
   Appointment, InsertAppointment, ContentItem, InsertContentItem,
   AuditLog, InsertAuditLog, EmergencyAccessGrant, InsertEmergencyAccessGrant
 } from "@shared/schema";
@@ -18,6 +18,7 @@ export class MemoryStorage implements IStorage {
   private inventoryReservations = new Map<string, InventoryReservation>();
   private prescriptionOrderItems = new Map<string, PrescriptionOrderItem>();
   private dispensingRecords = new Map<string, DispensingRecord>();
+  private batchSubstitutions = new Map<string, BatchSubstitution>();
   private orders = new Map<string, Order>();
   private orderItems = new Map<string, OrderItem[]>();
   private prescriptions = new Map<string, Prescription>();
@@ -558,6 +559,56 @@ export class MemoryStorage implements IStorage {
       this.orderItems = itemSnapshot;
       this.orders = orderSnapshot;
       this.stockMovements.length = movementCount;
+      throw error;
+    }
+  }
+
+  async substituteReservationBatch(input: { orderId: string; orderItemId: string; reservationId: string; substituteBatchId: string; actorId: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<BatchSubstitutionResult> {
+    const replay = this.batchSubstitutions.get(input.idempotencyKey);
+    if (replay) {
+      if (replay.orderId !== input.orderId || replay.orderItemId !== input.orderItemId || replay.substituteBatchId !== input.substituteBatchId) throw new InvalidDispensingError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for another batch substitution');
+      return { substitution: replay, originalReservation: this.inventoryReservations.get(replay.originalReservationId)!, substituteReservation: this.inventoryReservations.get(replay.substituteReservationId)!, idempotentReplay: true };
+    }
+    const order = this.orders.get(input.orderId);
+    const item = this.orderItems.get(input.orderId)?.find((value) => value.id === input.orderItemId);
+    const reservation = this.inventoryReservations.get(input.reservationId);
+    if (!order || !item || !reservation) throw new InvalidDispensingError('NOT_FOUND', 'Order item reservation not found');
+    if (['cancelled', 'partially_cancelled', 'fully_dispensed', 'delivered'].includes(order.status) || !['active', 'partially_dispensed'].includes(reservation.status)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reservation cannot be substituted from its current state');
+    if (reservation.batchId === input.substituteBatchId) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch must differ from the current batch');
+    const originalBatch = this.stockBatches.get(reservation.batchId);
+    const substituteBatch = this.stockBatches.get(input.substituteBatchId);
+    const remaining = reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased;
+    if (!originalBatch || !substituteBatch) throw new InvalidDispensingError('NOT_FOUND', 'Stock batch not found');
+    if (remaining <= 0 || substituteBatch.productId !== item.productId || substituteBatch.branchId !== order.branchId) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch must contain the same product in the same branch');
+    if (substituteBatch.status !== 'active' || substituteBatch.expiryDate <= new Date() || originalBatch.quantityReserved < remaining || substituteBatch.quantityOnHand - substituteBatch.quantityReserved < remaining) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Substitute batch is not eligible or lacks available stock');
+    const batchesSnapshot = new Map(Array.from(this.stockBatches.entries(), ([id, batch]) => [id, { ...batch }]));
+    const reservationsSnapshot = new Map(Array.from(this.inventoryReservations.entries(), ([id, value]) => [id, { ...value }]));
+    const itemsSnapshot = this.orderItems.get(order.id)!.map((value) => ({ ...value }));
+    const movementCount = this.stockMovements.length;
+    try {
+      const updatedOriginalBatch = { ...originalBatch, quantityReserved: originalBatch.quantityReserved - remaining, updatedAt: new Date() };
+      const updatedSubstituteBatch = { ...substituteBatch, quantityReserved: substituteBatch.quantityReserved + remaining, updatedAt: new Date() };
+      this.stockBatches.set(originalBatch.id, updatedOriginalBatch);
+      this.stockBatches.set(substituteBatch.id, updatedSubstituteBatch);
+      const updatedOriginalReservation = { ...reservation, quantityReleased: reservation.quantityReleased + remaining, status: reservation.quantityDispensed > 0 ? 'partially_released' : 'released', version: reservation.version + 1, updatedAt: new Date() } as InventoryReservation;
+      this.inventoryReservations.set(reservation.id, updatedOriginalReservation);
+      const substituteReservation = { id: crypto.randomUUID(), orderId: order.id, orderItemId: item.id, productId: item.productId, batchId: substituteBatch.id, branchId: order.branchId, quantityReserved: remaining, quantityDispensed: 0, quantityReleased: 0, status: 'active', version: 1, createdAt: new Date(), updatedAt: new Date() } as InventoryReservation;
+      this.inventoryReservations.set(substituteReservation.id, substituteReservation);
+      this.orderItems.set(order.id, this.orderItems.get(order.id)!.map((value) => value.id === item.id ? { ...value, batchId: substituteBatch.id } : value));
+      this.stockMovements.push(
+        { id: crypto.randomUUID(), productId: item.productId, batchId: originalBatch.id, branchId: order.branchId, orderId: order.id, orderItemId: item.id, reservationId: reservation.id, movementType: 'release', quantityDelta: remaining, balanceAfter: updatedOriginalBatch.quantityOnHand - updatedOriginalBatch.quantityReserved, quantityOnHandBefore: originalBatch.quantityOnHand, quantityOnHandAfter: updatedOriginalBatch.quantityOnHand, quantityReservedBefore: originalBatch.quantityReserved, quantityReservedAfter: updatedOriginalBatch.quantityReserved, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId ?? null, createdAt: new Date() },
+        { id: crypto.randomUUID(), productId: item.productId, batchId: substituteBatch.id, branchId: order.branchId, orderId: order.id, orderItemId: item.id, reservationId: substituteReservation.id, movementType: 'reservation', quantityDelta: -remaining, balanceAfter: updatedSubstituteBatch.quantityOnHand - updatedSubstituteBatch.quantityReserved, quantityOnHandBefore: substituteBatch.quantityOnHand, quantityOnHandAfter: updatedSubstituteBatch.quantityOnHand, quantityReservedBefore: substituteBatch.quantityReserved, quantityReservedAfter: updatedSubstituteBatch.quantityReserved, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId ?? null, createdAt: new Date() },
+      );
+      const substitution = { id: crypto.randomUUID(), branchId: order.branchId, orderId: order.id, orderItemId: item.id, originalReservationId: reservation.id, substituteReservationId: substituteReservation.id, originalBatchId: originalBatch.id, substituteBatchId: substituteBatch.id, quantity: remaining, reason: input.reason, performedBy: input.actorId, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId ?? null, createdAt: new Date() } as BatchSubstitution;
+      this.batchSubstitutions.set(input.idempotencyKey, substitution);
+      await this.createAuditLog({ ...audit, entityId: substitution.id, changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), quantity: remaining, originalBatchId: originalBatch.id, substituteBatchId: substituteBatch.id } });
+      return { substitution, originalReservation: updatedOriginalReservation, substituteReservation, idempotentReplay: false };
+    } catch (error) {
+      this.stockBatches = batchesSnapshot;
+      this.inventoryReservations = reservationsSnapshot;
+      this.orderItems.set(order.id, itemsSnapshot);
+      this.stockMovements.length = movementCount;
+      this.batchSubstitutions.delete(input.idempotencyKey);
       throw error;
     }
   }

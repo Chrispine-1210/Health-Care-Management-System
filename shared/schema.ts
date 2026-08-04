@@ -425,7 +425,7 @@ export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 export const inventoryReservations = pgTable("inventory_reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderId: varchar("order_id").notNull(),
-  orderItemId: varchar("order_item_id").notNull().unique(),
+  orderItemId: varchar("order_item_id").notNull(),
   productId: varchar("product_id").notNull(),
   batchId: varchar("batch_id").notNull(),
   branchId: varchar("branch_id").notNull(),
@@ -480,6 +480,17 @@ export const dispensingRecords = pgTable("dispensing_records", {
   dispensedAt: timestamp("dispensed_at").notNull().defaultNow(),
 });
 export type DispensingRecord = typeof dispensingRecords.$inferSelect;
+
+export const batchSubstitutions = pgTable("batch_substitutions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull(), orderId: varchar("order_id").notNull(), orderItemId: varchar("order_item_id").notNull(),
+  originalReservationId: varchar("original_reservation_id").notNull(), substituteReservationId: varchar("substitute_reservation_id").notNull(),
+  originalBatchId: varchar("original_batch_id").notNull(), substituteBatchId: varchar("substitute_batch_id").notNull(),
+  quantity: integer("quantity").notNull(), reason: text("reason").notNull(), performedBy: varchar("performed_by").notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull().unique(), correlationId: varchar("correlation_id", { length: 100 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type BatchSubstitution = typeof batchSubstitutions.$inferSelect;
 
 // ============================================================================
 // DELIVERIES

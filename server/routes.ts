@@ -101,6 +101,10 @@ const dispenseItemSchema = z.object({
   idempotencyKey: z.string().min(8).max(128), counsellingCompleted: z.boolean(),
   notes: z.string().trim().max(2000).optional(),
 }).strict();
+const batchSubstitutionSchema = z.object({
+  reservationId: z.string(), substituteBatchId: z.string(),
+  idempotencyKey: z.string().min(8).max(128), reason: z.string().trim().min(20).max(2000),
+}).strict();
 
 const appointmentUpdateSchema = z.object({
   practitionerId: z.string().nullable().optional(),
@@ -786,6 +790,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid dispensing request', issues: error.issues });
       logger.error('Order item dispensing failed', { error });
       res.status(500).json({ message: 'Failed to dispense order item' });
+    }
+  });
+
+  app.post('/api/orders/:orderId/items/:orderItemId/substitute-batch', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_BATCH_SUBSTITUTE), async (req, res) => {
+    try {
+      const payload = batchSubstitutionSchema.parse(req.body);
+      const order = await getStorage().getOrder(req.params.orderId);
+      if (!order || (req.user!.branchId && order.branchId !== req.user!.branchId)) return res.status(404).json({ message: 'Order not found' });
+      const result = await getStorage().substituteReservationBatch({ ...payload, orderId: order.id, orderItemId: req.params.orderItemId, actorId: req.user!.id, correlationId: res.locals.requestId }, buildAuditEvent(req, {
+        action: 'inventory.batch_substituted', entityType: 'batch_substitution',
+        changes: { orderId: order.id, orderItemId: req.params.orderItemId, originalReservationId: payload.reservationId, substituteBatchId: payload.substituteBatchId, reason: payload.reason, actorRole: req.user!.role },
+      }));
+      res.json({ success: true, idempotentReplay: result.idempotentReplay, substitutionId: result.substitution.id, originalReservationId: result.originalReservation.id, substituteReservationId: result.substituteReservation.id, quantity: result.substitution.quantity });
+    } catch (error) {
+      if (error instanceof InvalidDispensingError) return res.status(error.code === 'NOT_FOUND' ? 404 : 409).json({ message: error.message });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid batch substitution request', issues: error.issues });
+      logger.error('Batch substitution failed', { error });
+      res.status(500).json({ message: 'Failed to substitute reservation batch' });
     }
   });
 
