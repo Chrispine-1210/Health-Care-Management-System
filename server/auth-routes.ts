@@ -101,11 +101,11 @@ export function registerAuthRoutes(app: Express) {
    * POST /api/auth/refresh
    * Refresh access token
    */
-  app.post('/api/auth/refresh', (req, res) => {
+  app.post('/api/auth/refresh', async (req, res) => {
     try {
       const { refreshToken } = refreshSchema.parse(req.body);
 
-      const result = authService.refreshAccessToken(refreshToken);
+      const result = await authService.refreshAccessToken(refreshToken);
       if (!result) {
         return res.status(401).json({ success: false, message: 'Invalid refresh token' });
       }

@@ -100,6 +100,16 @@ export const usersRelations = relations(users, ({ one, many }) => ({
 export type User = typeof users.$inferSelect;
 export type UpsertUser = typeof users.$inferInsert;
 
+export const authCredentials = pgTable("auth_credentials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique(),
+  email: varchar("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type AuthCredential = typeof authCredentials.$inferSelect;
+
 // ============================================================================
 // BRANCHES
 // ============================================================================

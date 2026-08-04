@@ -1337,7 +1337,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/emergency-access', authenticateToken, requirePermission(PERMISSIONS.PATIENT_PROFILE_READ), async (req, res) => {
     try {
       const payload = breakGlassActivationSchema.parse(req.body);
-      if (!authService.confirmPassword(req.user!.email, payload.password)) {
+      if (!await authService.confirmPassword(req.user!.email, payload.password)) {
         await recordAuditEvent(req, { action: 'emergency_access.denied', entityType: 'patient', entityId: payload.patientId, changes: { reasonCode: payload.reasonCode, outcome: 'denied' } });
         return res.status(403).json({ message: 'Forbidden' });
       }

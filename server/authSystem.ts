@@ -1,6 +1,10 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'crypto';
 import { logger } from './logger';
 import { z } from 'zod';
+import { db } from './db';
+import { authCredentials, users } from '@shared/schema';
+import { eq } from 'drizzle-orm';
+import { normalizeHealthcareRole } from '@shared/healthcareAccess';
 
 /**
  * Production-Ready Authentication System
@@ -282,6 +286,7 @@ export class AuthService {
 
   // User credentials store (in-memory for demo, replace with database)
   private users: Map<string, { email: string; passwordHash: string; role: string; firstName: string; lastName: string }> = new Map();
+  private readonly databaseBacked = process.env.USE_DATABASE_STORAGE === 'true';
 
   constructor() {
     this.passwordManager = new PasswordManager();
@@ -302,10 +307,20 @@ export class AuthService {
       return null;
     }
 
-    // Find user
-    const user = this.users.get(email);
+    const normalizedEmail = email.trim().toLowerCase();
+    let user = this.users.get(normalizedEmail);
+    let userId = `user-${normalizedEmail}`;
+    if (this.databaseBacked) {
+      const [record] = await db.select({
+        userId: authCredentials.userId, email: authCredentials.email, passwordHash: authCredentials.passwordHash,
+        role: users.role, firstName: users.firstName, lastName: users.lastName, accountStatus: users.accountStatus,
+      }).from(authCredentials).innerJoin(users, eq(users.id, authCredentials.userId)).where(eq(authCredentials.email, normalizedEmail)).limit(1);
+      if (record?.accountStatus !== 'active') return null;
+      user = record ? { email: record.email, passwordHash: record.passwordHash, role: record.role, firstName: record.firstName ?? '', lastName: record.lastName ?? '' } : undefined;
+      if (record) userId = record.userId;
+    }
     if (!user) {
-      logger.warn('Login attempt with non-existent user', { email });
+      logger.warn('Login attempt with non-existent user', { email: normalizedEmail });
       return null;
     }
 
@@ -316,14 +331,13 @@ export class AuthService {
     }
 
     // Generate tokens
-    const userId = `user-${email}`;
-    const accessToken = this.tokenManager.createAccessToken(userId, email, user.role, user.firstName, user.lastName);
+    const accessToken = this.tokenManager.createAccessToken(userId, normalizedEmail, user.role, user.firstName, user.lastName);
     const refreshToken = this.tokenManager.createRefreshToken(userId);
 
     // Create session
-    this.sessionManager.createSession(userId, email, user.role, accessToken, refreshToken, 15 * 60);
+    this.sessionManager.createSession(userId, normalizedEmail, user.role, accessToken, refreshToken, 15 * 60);
 
-    logger.info('User logged in successfully', { email, role: user.role });
+    logger.info('User logged in successfully', { email: normalizedEmail, role: user.role });
 
     return {
       tokens: {
@@ -333,7 +347,7 @@ export class AuthService {
       },
       user: {
         id: userId,
-        email,
+        email: normalizedEmail,
         role: user.role,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -344,7 +358,7 @@ export class AuthService {
   /**
    * Refresh access token
    */
-  refreshAccessToken(refreshToken: string): { accessToken: string; expiresIn: number } | null {
+  async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresIn: number } | null> {
     const payload = this.tokenManager.verifyToken(refreshToken);
     if (!payload || payload.type !== 'refresh') {
       logger.warn('Invalid refresh token');
@@ -357,12 +371,16 @@ export class AuthService {
     }
 
     const session = this.sessionManager.getSession(payload.sub);
-    if (!session || session.refreshToken !== refreshToken || !this.sessionManager.isSessionActive(payload.sub)) {
+    if (!this.databaseBacked && (!session || session.refreshToken !== refreshToken || !this.sessionManager.isSessionActive(payload.sub))) {
       logger.warn('Refresh token session not found', { userId: payload.sub });
       return null;
     }
-
-    const user = Array.from(this.users.values()).find(u => u.email === session.email);
+    let user = session ? Array.from(this.users.values()).find(u => u.email === session.email) : undefined;
+    if (this.databaseBacked) {
+      const [record] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
+      if (record?.accountStatus !== 'active') return null;
+      user = record ? { email: record.email ?? '', passwordHash: '', role: record.role, firstName: record.firstName ?? '', lastName: record.lastName ?? '' } : undefined;
+    }
     if (!user) {
       logger.warn('User not found for refresh', { userId: payload.sub });
       return null;
@@ -371,8 +389,8 @@ export class AuthService {
     // Create new access token
     const newAccessToken = this.tokenManager.createAccessToken(
       payload.sub,
-      session.email,
-      session.role,
+      user.email,
+      user.role,
       user.firstName,
       user.lastName,
     );
@@ -399,7 +417,7 @@ export class AuthService {
       return null;
     }
 
-    if (!this.sessionManager.isSessionActive(payload.sub)) {
+    if (!this.databaseBacked && !this.sessionManager.isSessionActive(payload.sub)) {
       logger.warn('Inactive or expired session token rejected', { userId: payload.sub });
       return null;
     }
@@ -426,25 +444,41 @@ export class AuthService {
     firstName: string,
     lastName: string,
   ): Promise<{ success: boolean; message: string }> {
-    if (this.users.has(email)) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (this.users.has(normalizedEmail)) {
       return { success: false, message: 'User already exists' };
     }
 
     const passwordHash = this.passwordManager.hash(password);
-    this.users.set(email, {
-      email,
+    const canonicalRole = normalizeHealthcareRole(role) ?? 'patient';
+    if (this.databaseBacked) {
+      const existing = await db.select({ id: authCredentials.id }).from(authCredentials).where(eq(authCredentials.email, normalizedEmail)).limit(1);
+      if (existing.length) return { success: false, message: 'User already exists' };
+      const userId = randomUUID();
+      await db.transaction(async (tx) => {
+        await tx.insert(users).values({ id: userId, email: normalizedEmail, firstName, lastName, role: canonicalRole });
+        await tx.insert(authCredentials).values({ userId, email: normalizedEmail, passwordHash });
+      });
+    }
+    this.users.set(normalizedEmail, {
+      email: normalizedEmail,
       passwordHash,
-      role,
+      role: canonicalRole,
       firstName,
       lastName,
     });
 
-    logger.info('New user registered', { email, role });
+    logger.info('New user registered', { email: normalizedEmail, role: canonicalRole });
     return { success: true, message: 'User registered successfully' };
   }
 
-  confirmPassword(email: string, password: string): boolean {
-    const user = this.users.get(email);
+  async confirmPassword(email: string, password: string): Promise<boolean> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (this.databaseBacked) {
+      const [credential] = await db.select({ passwordHash: authCredentials.passwordHash }).from(authCredentials).where(eq(authCredentials.email, normalizedEmail)).limit(1);
+      return Boolean(credential && this.passwordManager.verify(password, credential.passwordHash));
+    }
+    const user = this.users.get(normalizedEmail);
     return Boolean(user && this.passwordManager.verify(password, user.passwordHash));
   }
 
