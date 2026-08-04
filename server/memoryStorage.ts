@@ -1,5 +1,5 @@
 import type { IStorage } from "./storage";
-import type { DispensingResult, OrderCancellationResult, OrderLineInput, ReleasedReservation } from "./storage";
+import type { DispensingResult, OrderCancellationResult, OrderLineInput, PrescriptionRevocationResult, ReleasedReservation } from "./storage";
 import { InsufficientStockError, InvalidDispensingError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
@@ -483,6 +483,10 @@ export class MemoryStorage implements IStorage {
     return Array.from(this.prescriptionOrderItems.values()).find((link) => link.prescriptionId === prescriptionId && link.orderItemId === orderItemId);
   }
 
+  async getPrescriptionOrderItems(prescriptionId: string): Promise<PrescriptionOrderItem[]> {
+    return Array.from(this.prescriptionOrderItems.values()).filter((link) => link.prescriptionId === prescriptionId);
+  }
+
   async reviewPrescriptionOrderItem(input: { prescriptionId: string; orderItemId: string; actorId: string; decision: 'approve' | 'partially_approve' | 'reject'; authorisedQuantity?: number; substitutionAllowed?: boolean; clinicalNote?: string; rejectionReason?: string }, audit: InsertAuditLog): Promise<PrescriptionOrderItem> {
     const prescription = this.prescriptions.get(input.prescriptionId);
     const link = await this.getPrescriptionOrderItem(input.prescriptionId, input.orderItemId);
@@ -496,7 +500,69 @@ export class MemoryStorage implements IStorage {
     return updated;
   }
 
-  async dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult> {
+  async revokePrescriptionWithAudit(input: { prescriptionId: string; actorId: string; reason: string; correlationId?: string }, audit: InsertAuditLog): Promise<PrescriptionRevocationResult> {
+    const prescription = this.prescriptions.get(input.prescriptionId);
+    if (!prescription) throw new InvalidDispensingError('NOT_FOUND', 'Prescription not found');
+    if (prescription.status === 'fully_dispensed' || prescription.status === 'dispensed') throw new InvalidDispensingError('NOT_ELIGIBLE', 'A fully dispensed prescription cannot be revoked');
+    if (prescription.status === 'revoked') return { prescription, releasedReservations: [] };
+    if (prescription.status === 'cancelled') throw new InvalidDispensingError('NOT_ELIGIBLE', 'A cancelled prescription cannot be revoked');
+    const links = Array.from(this.prescriptionOrderItems.values()).filter((link) => link.prescriptionId === prescription.id);
+    const prescriptionSnapshot = { ...prescription };
+    const linkSnapshot = new Map(links.map((link) => [link.id, { ...link }]));
+    const batchSnapshot = new Map(Array.from(this.stockBatches.entries(), ([id, batch]) => [id, { ...batch }]));
+    const reservationSnapshot = new Map(Array.from(this.inventoryReservations.entries(), ([id, reservation]) => [id, { ...reservation }]));
+    const itemSnapshot = new Map(Array.from(this.orderItems.entries(), ([id, items]) => [id, items.map((item) => ({ ...item }))]));
+    const orderSnapshot = new Map(Array.from(this.orders.entries(), ([id, order]) => [id, { ...order }]));
+    const movementCount = this.stockMovements.length;
+    const releasedReservations: ReleasedReservation[] = [];
+    try {
+      for (const link of links) {
+        const reservation = Array.from(this.inventoryReservations.values()).find((value) => value.orderItemId === link.orderItemId);
+        const items = this.orderItems.get(link.orderId) ?? [];
+        const item = items.find((value) => value.id === link.orderItemId);
+        if (!reservation || !item) continue;
+        const releasable = Math.max(0, reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased);
+        if (releasable > 0) {
+          const batch = this.stockBatches.get(reservation.batchId);
+          if (!batch || batch.quantityReserved < releasable) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reservation and batch balances are inconsistent');
+          const updatedBatch = { ...batch, quantityReserved: batch.quantityReserved - releasable, updatedAt: new Date() };
+          this.stockBatches.set(batch.id, updatedBatch);
+          this.inventoryReservations.set(reservation.id, { ...reservation, quantityReleased: reservation.quantityReleased + releasable, status: reservation.quantityDispensed > 0 ? 'partially_released' : 'released', version: reservation.version + 1, updatedAt: new Date() });
+          this.stockMovements.push({ id: crypto.randomUUID(), productId: reservation.productId, batchId: reservation.batchId, branchId: reservation.branchId, orderId: reservation.orderId, orderItemId: reservation.orderItemId, reservationId: reservation.id, movementType: 'release', quantityDelta: releasable, balanceAfter: updatedBatch.quantityOnHand - updatedBatch.quantityReserved, quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: batch.quantityOnHand, quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: updatedBatch.quantityReserved, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId ?? null, createdAt: new Date() });
+          releasedReservations.push({ reservationId: reservation.id, productId: reservation.productId, batchId: reservation.batchId, quantityReleased: releasable });
+        }
+        this.orderItems.set(link.orderId, items.map((value) => value.id === item.id ? { ...value, status: 'cancelled' } : value));
+        this.prescriptionOrderItems.set(link.id, { ...link, approvalStatus: 'revoked', version: link.version + 1, updatedAt: new Date() });
+      }
+      for (const orderId of new Set(links.map((link) => link.orderId))) {
+        const affectedItems = this.orderItems.get(orderId) ?? [];
+        const order = this.orders.get(orderId);
+        if (!order || affectedItems.length === 0 || !affectedItems.some((item) => item.status === 'cancelled')) continue;
+        const allCancelled = affectedItems.every((item) => item.status === 'cancelled');
+        const hasDispensed = affectedItems.some((item) => item.quantityDispensed > 0);
+        this.orders.set(orderId, { ...order, status: allCancelled ? (hasDispensed ? 'partially_cancelled' : 'cancelled') : 'partially_cancelled', updatedAt: new Date() });
+      }
+      const revoked = { ...prescription, status: 'revoked', revokedAt: new Date(), revokedBy: input.actorId, revocationReason: input.reason, updatedAt: new Date() } as Prescription;
+      this.prescriptions.set(prescription.id, revoked);
+      await this.createAuditLog({
+        ...audit,
+        entityId: prescription.id,
+        changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), releasedReservations },
+      });
+      return { prescription: revoked, releasedReservations };
+    } catch (error) {
+      this.prescriptions.set(prescription.id, prescriptionSnapshot);
+      for (const [id, link] of linkSnapshot) this.prescriptionOrderItems.set(id, link);
+      this.stockBatches = batchSnapshot;
+      this.inventoryReservations = reservationSnapshot;
+      this.orderItems = itemSnapshot;
+      this.orders = orderSnapshot;
+      this.stockMovements.length = movementCount;
+      throw error;
+    }
+  }
+
+  async dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; controlledMedicineAuthorized?: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult> {
     const replay = this.dispensingRecords.get(input.idempotencyKey);
     const order = this.orders.get(input.orderId);
     const item = this.orderItems.get(input.orderId)?.find((value) => value.id === input.orderItemId);
@@ -507,6 +573,7 @@ export class MemoryStorage implements IStorage {
     const batch = this.stockBatches.get(reservation.batchId);
     const product = this.products.get(item.productId);
     if (!batch || !product || batch.status !== 'active' || batch.expiryDate <= new Date()) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Stock batch is expired or blocked');
+    if (product.controlledMedicine && !input.controlledMedicineAuthorized) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Controlled-medicine dispensing authorization is required');
     const remaining = reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased;
     if (input.quantity <= 0 || input.quantity > remaining || input.quantity > batch.quantityReserved || input.quantity > batch.quantityOnHand) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Requested quantity exceeds eligible reserved stock');
     const link = Array.from(this.prescriptionOrderItems.values()).find((value) => value.orderItemId === item.id);

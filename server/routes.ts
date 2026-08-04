@@ -93,6 +93,9 @@ const prescriptionItemReviewSchema = z.object({
   if (value.decision !== 'reject' && value.authorisedQuantity === undefined) context.addIssue({ code: 'custom', path: ['authorisedQuantity'], message: 'Authorised quantity is required' });
   if (value.decision === 'reject' && !value.rejectionReason) context.addIssue({ code: 'custom', path: ['rejectionReason'], message: 'Rejection reason is required' });
 });
+const prescriptionRevocationSchema = z.object({
+  reason: z.string().trim().min(20).max(2000),
+}).strict();
 const dispenseItemSchema = z.object({
   reservationId: z.string(), quantity: z.number().int().positive().max(10000),
   idempotencyKey: z.string().min(8).max(128), counsellingCompleted: z.boolean(),
@@ -769,7 +772,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = dispenseItemSchema.parse(req.body);
       const order = await getStorage().getOrder(req.params.orderId);
       if (!order || (req.user!.branchId && order.branchId !== req.user!.branchId)) return res.status(404).json({ message: 'Order not found' });
-      const result = await getStorage().dispenseOrderItem({ ...payload, orderId: order.id, orderItemId: req.params.orderItemId, actorId: req.user!.id, correlationId: res.locals.requestId }, buildAuditEvent(req, {
+      const orderItem = (await getStorage().getOrderItems(order.id)).find((item) => item.id === req.params.orderItemId);
+      if (!orderItem) return res.status(404).json({ message: 'Order item not found' });
+      const product = await getStorage().getProduct(orderItem.productId);
+      if (product?.controlledMedicine && !hasPermission(req.user!.role, PERMISSIONS.CONTROLLED_MEDICINE_DISPENSE)) return res.status(403).json({ message: 'Controlled-medicine dispensing permission is required' });
+      const result = await getStorage().dispenseOrderItem({ ...payload, orderId: order.id, orderItemId: req.params.orderItemId, actorId: req.user!.id, controlledMedicineAuthorized: hasPermission(req.user!.role, PERMISSIONS.CONTROLLED_MEDICINE_DISPENSE), correlationId: res.locals.requestId }, buildAuditEvent(req, {
         action: 'dispensing.completed', entityType: 'dispensing_record',
         changes: { orderId: order.id, orderItemId: req.params.orderItemId, reservationId: payload.reservationId, quantity: payload.quantity, counsellingCompleted: payload.counsellingCompleted, actorRole: req.user!.role },
       }));
@@ -856,6 +863,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid prescription review request', issues: error.issues });
       logger.error('Prescription item review failed', { error });
       res.status(500).json({ message: 'Failed to review prescription item' });
+    }
+  });
+
+  app.post('/api/prescriptions/:prescriptionId/revoke', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_REVOKE), async (req, res) => {
+    try {
+      const payload = prescriptionRevocationSchema.parse(req.body);
+      const prescription = await getStorage().getPrescription(req.params.prescriptionId);
+      if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+      const prescriptionLinks = await getStorage().getPrescriptionOrderItems(prescription.id);
+      if (req.user!.branchId && prescriptionLinks.some((link) => link.branchId !== req.user!.branchId)) return res.status(404).json({ message: 'Prescription not found' });
+      const result = await getStorage().revokePrescriptionWithAudit({ prescriptionId: prescription.id, actorId: req.user!.id, reason: payload.reason, correlationId: res.locals.requestId }, buildAuditEvent(req, {
+        action: 'prescription.revoked', entityType: 'prescription', entityId: prescription.id,
+        changes: { previousStatus: prescription.status, reason: payload.reason, actorRole: req.user!.role },
+      }));
+      if (prescription.status !== 'revoked') {
+        const patient = await getStorage().getUser(prescription.patientId);
+        try {
+          await notificationService.enqueue({ eventType: 'prescription.revoked', channels: patient?.email ? ['email'] : [], recipient: { userId: prescription.patientId, email: patient?.email ?? undefined, firstName: patient?.firstName ?? undefined }, template: 'custom', variables: { subject: 'Prescription approval revoked', message: 'Your prescription approval was revoked. Contact the pharmacy for assistance.' } });
+        } catch (error) {
+          logger.error('Prescription revocation notification failed', { error, prescriptionId: prescription.id });
+        }
+      }
+      res.json({ success: true, prescriptionId: result.prescription.id, status: result.prescription.status, releasedReservations: result.releasedReservations });
+    } catch (error) {
+      if (error instanceof InvalidDispensingError) return res.status(error.code === 'NOT_FOUND' ? 404 : 409).json({ message: error.message });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid prescription revocation request', issues: error.issues });
+      logger.error('Prescription revocation failed', { error });
+      res.status(500).json({ message: 'Failed to revoke prescription' });
     }
   });
 

@@ -62,6 +62,7 @@ export interface OrderCancellationResult {
 }
 export type OrderLineInput = Omit<InsertOrderItem, 'orderId'> & { prescriptionLink?: { prescriptionId: string; prescribedQuantity: number } };
 export interface DispensingResult { record: DispensingRecord; order: Order; item: OrderItem; reservation: InventoryReservation; idempotentReplay: boolean; }
+export interface PrescriptionRevocationResult { prescription: Prescription; releasedReservations: ReleasedReservation[]; }
 
 export interface IStorage {
   // User operations (required for Replit Auth)
@@ -116,8 +117,10 @@ export interface IStorage {
   cancelOrderWithAudit(input: { orderId: string; actorId: string; reasonCode: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<OrderCancellationResult>;
   getReservationsByOrder(orderId: string): Promise<InventoryReservation[]>;
   getPrescriptionOrderItem(prescriptionId: string, orderItemId: string): Promise<PrescriptionOrderItem | undefined>;
+  getPrescriptionOrderItems(prescriptionId: string): Promise<PrescriptionOrderItem[]>;
   reviewPrescriptionOrderItem(input: { prescriptionId: string; orderItemId: string; actorId: string; decision: 'approve' | 'partially_approve' | 'reject'; authorisedQuantity?: number; substitutionAllowed?: boolean; clinicalNote?: string; rejectionReason?: string }, audit: InsertAuditLog): Promise<PrescriptionOrderItem>;
-  dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult>;
+  revokePrescriptionWithAudit(input: { prescriptionId: string; actorId: string; reason: string; correlationId?: string }, audit: InsertAuditLog): Promise<PrescriptionRevocationResult>;
+  dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; controlledMedicineAuthorized?: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult>;
 
   // Order Item operations
   getOrderItems(orderId: string): Promise<OrderItem[]>;
@@ -575,6 +578,10 @@ export class DatabaseStorage implements IStorage {
     return link;
   }
 
+  async getPrescriptionOrderItems(prescriptionId: string): Promise<PrescriptionOrderItem[]> {
+    return db.select().from(prescriptionOrderItems).where(eq(prescriptionOrderItems.prescriptionId, prescriptionId));
+  }
+
   async reviewPrescriptionOrderItem(input: { prescriptionId: string; orderItemId: string; actorId: string; decision: 'approve' | 'partially_approve' | 'reject'; authorisedQuantity?: number; substitutionAllowed?: boolean; clinicalNote?: string; rejectionReason?: string }, audit: InsertAuditLog): Promise<PrescriptionOrderItem> {
     return db.transaction(async (tx) => {
       const [prescription] = await tx.select().from(prescriptions).where(eq(prescriptions.id, input.prescriptionId)).for('update');
@@ -599,7 +606,60 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult> {
+  async revokePrescriptionWithAudit(input: { prescriptionId: string; actorId: string; reason: string; correlationId?: string }, audit: InsertAuditLog): Promise<PrescriptionRevocationResult> {
+    return db.transaction(async (tx) => {
+      const linkCandidates = await tx.select().from(prescriptionOrderItems).where(eq(prescriptionOrderItems.prescriptionId, input.prescriptionId));
+      const orderIds = [...new Set(linkCandidates.map((link) => link.orderId))].sort();
+      for (const orderId of orderIds) await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, orderId)).for('update');
+      const itemIds = [...new Set(linkCandidates.map((link) => link.orderItemId))].sort();
+      for (const itemId of itemIds) await tx.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.id, itemId)).for('update');
+      const links = await tx.select().from(prescriptionOrderItems).where(eq(prescriptionOrderItems.prescriptionId, input.prescriptionId)).orderBy(prescriptionOrderItems.orderItemId).for('update');
+      const [prescription] = await tx.select().from(prescriptions).where(eq(prescriptions.id, input.prescriptionId)).for('update');
+      if (!prescription) throw new InvalidDispensingError('NOT_FOUND', 'Prescription not found');
+      if (prescription.status === 'fully_dispensed' || prescription.status === 'dispensed') throw new InvalidDispensingError('NOT_ELIGIBLE', 'A fully dispensed prescription cannot be revoked');
+      if (prescription.status === 'revoked') return { prescription, releasedReservations: [] };
+      if (prescription.status === 'cancelled') throw new InvalidDispensingError('NOT_ELIGIBLE', 'A cancelled prescription cannot be revoked');
+
+      const releasedReservations: ReleasedReservation[] = [];
+      for (const link of links) {
+        const [item] = await tx.select().from(orderItems).where(eq(orderItems.id, link.orderItemId));
+        const [reservation] = await tx.select().from(inventoryReservations).where(eq(inventoryReservations.orderItemId, link.orderItemId)).for('update');
+        if (!item || !reservation) continue;
+        const releasable = Math.max(0, reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased);
+        if (releasable > 0) {
+          const [batch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, reservation.batchId)).for('update');
+          if (!batch || batch.quantityReserved < releasable) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reservation and batch balances are inconsistent');
+          const [updatedBatch] = await tx.update(stockBatches).set({ quantityReserved: sql`${stockBatches.quantityReserved} - ${releasable}`, updatedAt: new Date() }).where(and(eq(stockBatches.id, batch.id), gte(stockBatches.quantityReserved, releasable))).returning();
+          if (!updatedBatch) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Concurrent stock mutation prevented prescription revocation');
+          const [updatedReservation] = await tx.update(inventoryReservations).set({ quantityReleased: reservation.quantityReleased + releasable, status: reservation.quantityDispensed > 0 ? 'partially_released' : 'released', version: reservation.version + 1, updatedAt: new Date() }).where(and(eq(inventoryReservations.id, reservation.id), eq(inventoryReservations.version, reservation.version))).returning();
+          if (!updatedReservation) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Concurrent reservation mutation prevented prescription revocation');
+          await tx.insert(stockMovements).values({ productId: reservation.productId, batchId: reservation.batchId, branchId: reservation.branchId, orderId: reservation.orderId, orderItemId: reservation.orderItemId, reservationId: reservation.id, movementType: 'release', quantityDelta: releasable, balanceAfter: updatedBatch.quantityOnHand - updatedBatch.quantityReserved, quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: batch.quantityOnHand, quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: updatedBatch.quantityReserved, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId });
+          releasedReservations.push({ reservationId: reservation.id, productId: reservation.productId, batchId: reservation.batchId, quantityReleased: releasable });
+        }
+        await tx.update(orderItems).set({ status: 'cancelled' }).where(eq(orderItems.id, item.id));
+        await tx.update(prescriptionOrderItems).set({ approvalStatus: 'revoked', version: link.version + 1, updatedAt: new Date() }).where(and(eq(prescriptionOrderItems.id, link.id), eq(prescriptionOrderItems.version, link.version)));
+      }
+      for (const orderId of orderIds) {
+        const affectedItems = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+        const allCancelled = affectedItems.length > 0 && affectedItems.every((item) => item.status === 'cancelled');
+        const hasDispensed = affectedItems.some((item) => item.quantityDispensed > 0);
+        if (allCancelled) {
+          await tx.update(orders).set({ status: hasDispensed ? 'partially_cancelled' : 'cancelled', updatedAt: new Date() }).where(eq(orders.id, orderId));
+        } else if (affectedItems.some((item) => item.status === 'cancelled')) {
+          await tx.update(orders).set({ status: 'partially_cancelled', updatedAt: new Date() }).where(eq(orders.id, orderId));
+        }
+      }
+      const [revoked] = await tx.update(prescriptions).set({ status: 'revoked', revokedAt: new Date(), revokedBy: input.actorId, revocationReason: input.reason, updatedAt: new Date() }).where(eq(prescriptions.id, prescription.id)).returning();
+      await tx.insert(auditLogs).values({
+        ...audit,
+        entityId: prescription.id,
+        changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), releasedReservations },
+      });
+      return { prescription: revoked, releasedReservations };
+    });
+  }
+
+  async dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; controlledMedicineAuthorized?: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult> {
     return db.transaction(async (tx) => {
       const [order] = await tx.select().from(orders).where(eq(orders.id, input.orderId)).for('update');
       if (!order) throw new InvalidDispensingError('NOT_FOUND', 'Order not found');
@@ -613,19 +673,20 @@ export class DatabaseStorage implements IStorage {
       if (['cancelled', 'partially_cancelled', 'fully_dispensed', 'delivered'].includes(order.status)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Order cannot be dispensed from its current state');
       const [item] = await tx.select().from(orderItems).where(and(eq(orderItems.id, input.orderItemId), eq(orderItems.orderId, order.id))).for('update');
       const [link] = await tx.select().from(prescriptionOrderItems).where(eq(prescriptionOrderItems.orderItemId, input.orderItemId)).for('update');
+      const [linkedPrescription] = link ? await tx.select().from(prescriptions).where(eq(prescriptions.id, link.prescriptionId)).for('update') : [];
       const [reservation] = await tx.select().from(inventoryReservations).where(and(eq(inventoryReservations.id, input.reservationId), eq(inventoryReservations.orderItemId, input.orderItemId))).for('update');
       if (!item || !reservation) throw new InvalidDispensingError('NOT_FOUND', 'Order item reservation not found');
       const [batch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, reservation.batchId)).for('update');
       const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
       if (!batch || !product) throw new InvalidDispensingError('NOT_FOUND', 'Inventory data not found');
+      if (product.controlledMedicine && !input.controlledMedicineAuthorized) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Controlled-medicine dispensing authorization is required');
       const remainingReserved = reservation.quantityReserved - reservation.quantityDispensed - reservation.quantityReleased;
       if (!['active', 'partially_dispensed'].includes(reservation.status) || input.quantity <= 0 || input.quantity > remainingReserved || input.quantity > batch.quantityOnHand || input.quantity > batch.quantityReserved) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Requested quantity exceeds eligible reserved stock');
       if (batch.status !== 'active' || batch.expiryDate <= new Date()) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Stock batch is expired or blocked');
       const requiresApproval = product.prescriptionRequirement !== 'none' || product.prescriptionRequired || product.requiresPharmacistApproval;
       if (requiresApproval) {
         if (!link || !['approved', 'partially_approved'].includes(link.approvalStatus)) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Approved prescription item linkage is required');
-        const [prescription] = await tx.select().from(prescriptions).where(eq(prescriptions.id, link.prescriptionId)).for('update');
-        if (!prescription || prescription.revokedAt || ['revoked', 'cancelled', 'expired', 'rejected'].includes(prescription.status) || (prescription.expiresAt && prescription.expiresAt <= new Date())) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Prescription is not valid for dispensing');
+        if (!linkedPrescription || linkedPrescription.revokedAt || ['revoked', 'cancelled', 'expired', 'rejected'].includes(linkedPrescription.status) || (linkedPrescription.expiresAt && linkedPrescription.expiresAt <= new Date())) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Prescription is not valid for dispensing');
         if (input.quantity > link.authorisedQuantity - link.dispensedQuantity) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Requested quantity exceeds remaining prescription authorisation');
       }
       const [updatedBatch] = await tx.update(stockBatches).set({ quantityOnHand: sql`${stockBatches.quantityOnHand} - ${input.quantity}`, quantityReserved: sql`${stockBatches.quantityReserved} - ${input.quantity}`, updatedAt: new Date() }).where(and(eq(stockBatches.id, batch.id), gte(stockBatches.quantityOnHand, input.quantity), gte(stockBatches.quantityReserved, input.quantity))).returning();

@@ -247,6 +247,16 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(dispensing.status, 409);
   assert.equal((await storage.getPrescription(pendingPrescription.id))?.status, 'approved');
 
+  const patientRevocation = await request(`/api/prescriptions/${pendingPrescription.id}/revoke`, patientA.token, {
+    method: 'POST', body: JSON.stringify({ reason: 'Patient attempted an unauthorised clinical revocation.' }),
+  });
+  assert.equal(patientRevocation.status, 403);
+  const pharmacistRevocation = await request(`/api/prescriptions/${pendingPrescription.id}/revoke`, pharmacist.token, {
+    method: 'POST', body: JSON.stringify({ reason: 'Pharmacist revoked approval after a clinical reassessment.' }),
+  });
+  assert.equal(pharmacistRevocation.status, 200);
+  assert.equal((await storage.getPrescription(pendingPrescription.id))?.status, 'revoked');
+
   const forbiddenPermission = await request('/api/admin/audit-logs', patientA.token);
   assert.equal(forbiddenPermission.status, 403);
   assert.equal((await forbiddenPermission.json() as { message: string }).message, 'Forbidden');
