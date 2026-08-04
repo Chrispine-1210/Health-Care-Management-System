@@ -7,6 +7,7 @@ import {
   inventoryReservations,
   prescriptionOrderItems,
   dispensingRecords,
+  dispensingReversals,
   batchSubstitutions,
   orders,
   orderItems,
@@ -28,6 +29,7 @@ import {
   type InventoryReservation,
   type PrescriptionOrderItem,
   type DispensingRecord,
+  type DispensingReversal,
   type BatchSubstitution,
   type Order,
   type InsertOrder,
@@ -64,6 +66,7 @@ export interface OrderCancellationResult {
 }
 export type OrderLineInput = Omit<InsertOrderItem, 'orderId'> & { prescriptionLink?: { prescriptionId: string; prescribedQuantity: number } };
 export interface DispensingResult { record: DispensingRecord; order: Order; item: OrderItem; reservation: InventoryReservation; idempotentReplay: boolean; }
+export interface DispensingReversalResult { reversal: DispensingReversal; order: Order; item: OrderItem; reservation: InventoryReservation; quarantineBatch: StockBatch; idempotentReplay: boolean; }
 export interface PrescriptionRevocationResult { prescription: Prescription; releasedReservations: ReleasedReservation[]; }
 export interface BatchSubstitutionResult { substitution: BatchSubstitution; originalReservation: InventoryReservation; substituteReservation: InventoryReservation; idempotentReplay: boolean; }
 
@@ -125,6 +128,7 @@ export interface IStorage {
   revokePrescriptionWithAudit(input: { prescriptionId: string; actorId: string; reason: string; correlationId?: string }, audit: InsertAuditLog): Promise<PrescriptionRevocationResult>;
   substituteReservationBatch(input: { orderId: string; orderItemId: string; reservationId: string; substituteBatchId: string; actorId: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<BatchSubstitutionResult>;
   dispenseOrderItem(input: { orderId: string; orderItemId: string; reservationId: string; quantity: number; actorId: string; idempotencyKey: string; counsellingCompleted: boolean; controlledMedicineAuthorized?: boolean; notes?: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingResult>;
+  reverseDispensing(input: { dispensingRecordId: string; quantity: number; actorId: string; actorBranchId?: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingReversalResult>;
 
   // Order Item operations
   getOrderItems(orderId: string): Promise<OrderItem[]>;
@@ -762,6 +766,49 @@ export class DatabaseStorage implements IStorage {
       await tx.insert(stockMovements).values({ productId: item.productId, batchId: batch.id, branchId: order.branchId, orderId: order.id, orderItemId: item.id, reservationId: reservation.id, movementType: 'dispense', quantityDelta: -input.quantity, balanceAfter: updatedBatch.quantityOnHand - updatedBatch.quantityReserved, quantityOnHandBefore: batch.quantityOnHand, quantityOnHandAfter: updatedBatch.quantityOnHand, quantityReservedBefore: batch.quantityReserved, quantityReservedAfter: updatedBatch.quantityReserved, reason: 'Dispensed against reserved customer order', performedBy: input.actorId, correlationId: input.correlationId });
       await tx.insert(auditLogs).values({ ...audit, entityId: record.id });
       return { record, order: updatedOrder, item: updatedItem, reservation: updatedReservation, idempotentReplay: false };
+    });
+  }
+
+  async reverseDispensing(input: { dispensingRecordId: string; quantity: number; actorId: string; actorBranchId?: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingReversalResult> {
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(dispensingReversals).where(eq(dispensingReversals.idempotencyKey, input.idempotencyKey));
+      if (existing) {
+        if (input.actorBranchId && existing.branchId !== input.actorBranchId) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing record not found');
+        if (existing.dispensingRecordId !== input.dispensingRecordId || existing.quantity !== input.quantity) throw new InvalidDispensingError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for another reversal');
+        const [order] = await tx.select().from(orders).where(eq(orders.id, existing.orderId));
+        const [item] = await tx.select().from(orderItems).where(eq(orderItems.id, existing.orderItemId));
+        const [reservation] = await tx.select().from(inventoryReservations).where(eq(inventoryReservations.id, existing.reservationId));
+        const [quarantineBatch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, existing.quarantineBatchId));
+        return { reversal: existing, order, item, reservation, quarantineBatch, idempotentReplay: true };
+      }
+      const [record] = await tx.select().from(dispensingRecords).where(eq(dispensingRecords.id, input.dispensingRecordId)).for('update');
+      if (!record) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing record not found');
+      if (input.actorBranchId && record.branchId !== input.actorBranchId) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing record not found');
+      const [order] = await tx.select().from(orders).where(eq(orders.id, record.orderId)).for('update');
+      const [item] = await tx.select().from(orderItems).where(eq(orderItems.id, record.orderItemId)).for('update');
+      const [reservation] = await tx.select().from(inventoryReservations).where(eq(inventoryReservations.id, record.reservationId)).for('update');
+      const [batch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, record.batchId)).for('update');
+      if (!order || !item || !reservation || !batch) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing evidence is incomplete');
+      const [{ reversed }] = await tx.select({ reversed: sql<number>`coalesce(sum(${dispensingReversals.quantity}), 0)::int` }).from(dispensingReversals).where(eq(dispensingReversals.dispensingRecordId, record.id));
+      if (input.quantity <= 0 || input.quantity > record.quantity - reversed || input.quantity > item.quantityDispensed || input.quantity > reservation.quantityDispensed) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reversal quantity exceeds the remaining dispensed quantity');
+      const [quarantineBatch] = await tx.insert(stockBatches).values({ productId: record.productId, branchId: record.branchId, batchNumber: `${batch.batchNumber}-RETURN-${input.idempotencyKey.slice(0, 12)}`, quantityOnHand: input.quantity, quantityReserved: 0, expiryDate: batch.expiryDate, costPrice: batch.costPrice, supplierName: batch.supplierName, status: 'quarantined' }).returning();
+      const remainingReservationDispensed = reservation.quantityDispensed - input.quantity;
+      const [updatedReservation] = await tx.update(inventoryReservations).set({ quantityDispensed: remainingReservationDispensed, quantityReleased: reservation.quantityReleased + input.quantity, status: remainingReservationDispensed > 0 ? 'partially_released' : 'released', version: reservation.version + 1, updatedAt: new Date() }).where(and(eq(inventoryReservations.id, reservation.id), eq(inventoryReservations.version, reservation.version))).returning();
+      if (!updatedReservation) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Concurrent reservation mutation prevented reversal');
+      const remainingItemDispensed = item.quantityDispensed - input.quantity;
+      const [updatedItem] = await tx.update(orderItems).set({ quantityDispensed: remainingItemDispensed, status: remainingItemDispensed > 0 ? 'partially_fulfilled' : 'cancelled' }).where(eq(orderItems.id, item.id)).returning();
+      const [link] = record.prescriptionOrderItemId ? await tx.select().from(prescriptionOrderItems).where(eq(prescriptionOrderItems.id, record.prescriptionOrderItemId)).for('update') : [];
+      if (link) {
+        const remainingLinkDispensed = link.dispensedQuantity - input.quantity;
+        if (remainingLinkDispensed < 0) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Prescription dispensing evidence is inconsistent');
+        await tx.update(prescriptionOrderItems).set({ dispensedQuantity: remainingLinkDispensed, approvalStatus: link.authorisedQuantity === remainingLinkDispensed ? 'fully_consumed' : (link.authorisedQuantity < link.prescribedQuantity ? 'partially_approved' : 'approved'), version: link.version + 1, updatedAt: new Date() }).where(and(eq(prescriptionOrderItems.id, link.id), eq(prescriptionOrderItems.version, link.version)));
+        await tx.update(prescriptions).set({ status: remainingLinkDispensed > 0 ? 'partially_dispensed' : 'approved', updatedAt: new Date() }).where(eq(prescriptions.id, link.prescriptionId));
+      }
+      const [updatedOrder] = await tx.update(orders).set({ status: 'partially_cancelled', updatedAt: new Date() }).where(eq(orders.id, order.id)).returning();
+      const [reversal] = await tx.insert(dispensingReversals).values({ dispensingRecordId: record.id, branchId: record.branchId, orderId: record.orderId, orderItemId: record.orderItemId, reservationId: record.reservationId, productId: record.productId, originalBatchId: record.batchId, quarantineBatchId: quarantineBatch.id, quantity: input.quantity, reason: input.reason, performedBy: input.actorId, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId }).returning();
+      await tx.insert(stockMovements).values({ productId: record.productId, batchId: quarantineBatch.id, branchId: record.branchId, orderId: record.orderId, orderItemId: record.orderItemId, reservationId: record.reservationId, movementType: 'quarantine', quantityDelta: input.quantity, balanceAfter: input.quantity, quantityOnHandBefore: 0, quantityOnHandAfter: input.quantity, quantityReservedBefore: 0, quantityReservedAfter: 0, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId });
+      await tx.insert(auditLogs).values({ ...audit, entityId: reversal.id, changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), quarantineBatchId: quarantineBatch.id } });
+      return { reversal, order: updatedOrder, item: updatedItem, reservation: updatedReservation, quarantineBatch, idempotentReplay: false };
     });
   }
 

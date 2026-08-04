@@ -1,10 +1,10 @@
 import type { IStorage } from "./storage";
-import type { BatchSubstitutionResult, DispensingResult, OrderCancellationResult, OrderLineInput, PrescriptionRevocationResult, ReleasedReservation } from "./storage";
+import type { BatchSubstitutionResult, DispensingResult, DispensingReversalResult, OrderCancellationResult, OrderLineInput, PrescriptionRevocationResult, ReleasedReservation } from "./storage";
 import { InsufficientStockError, InvalidDispensingError, InvalidOrderCancellationError, InvalidStockAdjustmentError } from "./storageErrors";
 import type {
   User, UpsertUser, Branch, InsertBranch, Product, InsertProduct,
   StockBatch, InsertStockBatch, StockMovement, InventoryReservation, Order, InsertOrder, OrderItem, InsertOrderItem,
-  Prescription, InsertPrescription, PrescriptionOrderItem, DispensingRecord, BatchSubstitution, Delivery, InsertDelivery,
+  Prescription, InsertPrescription, PrescriptionOrderItem, DispensingRecord, DispensingReversal, BatchSubstitution, Delivery, InsertDelivery,
   Appointment, InsertAppointment, ContentItem, InsertContentItem,
   AuditLog, InsertAuditLog, EmergencyAccessGrant, InsertEmergencyAccessGrant
 } from "@shared/schema";
@@ -18,6 +18,7 @@ export class MemoryStorage implements IStorage {
   private inventoryReservations = new Map<string, InventoryReservation>();
   private prescriptionOrderItems = new Map<string, PrescriptionOrderItem>();
   private dispensingRecords = new Map<string, DispensingRecord>();
+  private dispensingReversals = new Map<string, DispensingReversal>();
   private batchSubstitutions = new Map<string, BatchSubstitution>();
   private orders = new Map<string, Order>();
   private orderItems = new Map<string, OrderItem[]>();
@@ -660,6 +661,65 @@ export class MemoryStorage implements IStorage {
       this.inventoryReservations.set(reservation.id, reservationSnapshot);
       if (linkSnapshot) this.prescriptionOrderItems.set(linkSnapshot.id, linkSnapshot);
       this.dispensingRecords.delete(input.idempotencyKey);
+      this.stockMovements.length = movementCount;
+      throw error;
+    }
+  }
+
+  async reverseDispensing(input: { dispensingRecordId: string; quantity: number; actorId: string; actorBranchId?: string; reason: string; idempotencyKey: string; correlationId?: string }, audit: InsertAuditLog): Promise<DispensingReversalResult> {
+    const replay = this.dispensingReversals.get(input.idempotencyKey);
+    if (replay) {
+      if (input.actorBranchId && replay.branchId !== input.actorBranchId) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing record not found');
+      if (replay.dispensingRecordId !== input.dispensingRecordId || replay.quantity !== input.quantity) throw new InvalidDispensingError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for another reversal');
+      return { reversal: replay, order: this.orders.get(replay.orderId)!, item: this.orderItems.get(replay.orderId)!.find((value) => value.id === replay.orderItemId)!, reservation: this.inventoryReservations.get(replay.reservationId)!, quarantineBatch: this.stockBatches.get(replay.quarantineBatchId)!, idempotentReplay: true };
+    }
+    const record = Array.from(this.dispensingRecords.values()).find((value) => value.id === input.dispensingRecordId);
+    if (!record) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing record not found');
+    if (input.actorBranchId && record.branchId !== input.actorBranchId) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing record not found');
+    const order = this.orders.get(record.orderId);
+    const item = this.orderItems.get(record.orderId)?.find((value) => value.id === record.orderItemId);
+    const reservation = this.inventoryReservations.get(record.reservationId);
+    const batch = this.stockBatches.get(record.batchId);
+    if (!order || !item || !reservation || !batch) throw new InvalidDispensingError('NOT_FOUND', 'Dispensing evidence is incomplete');
+    const reversed = Array.from(this.dispensingReversals.values()).filter((value) => value.dispensingRecordId === record.id).reduce((sum, value) => sum + value.quantity, 0);
+    if (input.quantity <= 0 || input.quantity > record.quantity - reversed || input.quantity > item.quantityDispensed || input.quantity > reservation.quantityDispensed) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Reversal quantity exceeds the remaining dispensed quantity');
+    const link = record.prescriptionOrderItemId ? this.prescriptionOrderItems.get(record.prescriptionOrderItemId) : undefined;
+    const prescription = link ? this.prescriptions.get(link.prescriptionId) : undefined;
+    const itemSnapshot = this.orderItems.get(order.id)!.map((value) => ({ ...value }));
+    const reservationSnapshot = { ...reservation };
+    const linkSnapshot = link ? { ...link } : undefined;
+    const prescriptionSnapshot = prescription ? { ...prescription } : undefined;
+    const movementCount = this.stockMovements.length;
+    const quarantineBatch = { ...batch, id: crypto.randomUUID(), batchNumber: `${batch.batchNumber}-RETURN-${input.idempotencyKey.slice(0, 12)}`, quantityOnHand: input.quantity, quantityReserved: 0, status: 'quarantined', receivedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as StockBatch;
+    try {
+      this.stockBatches.set(quarantineBatch.id, quarantineBatch);
+      const remainingReservationDispensed = reservation.quantityDispensed - input.quantity;
+      const updatedReservation = { ...reservation, quantityDispensed: remainingReservationDispensed, quantityReleased: reservation.quantityReleased + input.quantity, status: remainingReservationDispensed > 0 ? 'partially_released' : 'released', version: reservation.version + 1, updatedAt: new Date() } as InventoryReservation;
+      this.inventoryReservations.set(reservation.id, updatedReservation);
+      const remainingItemDispensed = item.quantityDispensed - input.quantity;
+      const updatedItem = { ...item, quantityDispensed: remainingItemDispensed, status: remainingItemDispensed > 0 ? 'partially_fulfilled' : 'cancelled' } as OrderItem;
+      this.orderItems.set(order.id, this.orderItems.get(order.id)!.map((value) => value.id === item.id ? updatedItem : value));
+      if (link) {
+        const remainingLinkDispensed = link.dispensedQuantity - input.quantity;
+        if (remainingLinkDispensed < 0) throw new InvalidDispensingError('NOT_ELIGIBLE', 'Prescription dispensing evidence is inconsistent');
+        this.prescriptionOrderItems.set(link.id, { ...link, dispensedQuantity: remainingLinkDispensed, approvalStatus: remainingLinkDispensed === link.authorisedQuantity ? 'fully_consumed' : (link.authorisedQuantity < link.prescribedQuantity ? 'partially_approved' : 'approved'), version: link.version + 1, updatedAt: new Date() });
+        if (prescription) this.prescriptions.set(prescription.id, { ...prescription, status: remainingLinkDispensed > 0 ? 'partially_dispensed' : 'approved', updatedAt: new Date() });
+      }
+      const updatedOrder = { ...order, status: 'partially_cancelled', updatedAt: new Date() } as Order;
+      this.orders.set(order.id, updatedOrder);
+      const reversal = { id: crypto.randomUUID(), dispensingRecordId: record.id, branchId: record.branchId, orderId: record.orderId, orderItemId: record.orderItemId, reservationId: record.reservationId, productId: record.productId, originalBatchId: record.batchId, quarantineBatchId: quarantineBatch.id, quantity: input.quantity, reason: input.reason, performedBy: input.actorId, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId ?? null, reversedAt: new Date() } as DispensingReversal;
+      this.dispensingReversals.set(input.idempotencyKey, reversal);
+      this.stockMovements.push({ id: crypto.randomUUID(), productId: record.productId, batchId: quarantineBatch.id, branchId: record.branchId, orderId: record.orderId, orderItemId: record.orderItemId, reservationId: record.reservationId, movementType: 'quarantine', quantityDelta: input.quantity, balanceAfter: input.quantity, quantityOnHandBefore: 0, quantityOnHandAfter: input.quantity, quantityReservedBefore: 0, quantityReservedAfter: 0, reason: input.reason, performedBy: input.actorId, correlationId: input.correlationId ?? null, createdAt: new Date() });
+      await this.createAuditLog({ ...audit, entityId: reversal.id, changes: { ...(audit.changes as Record<string, unknown> | null ?? {}), quarantineBatchId: quarantineBatch.id } });
+      return { reversal, order: updatedOrder, item: updatedItem, reservation: updatedReservation, quarantineBatch, idempotentReplay: false };
+    } catch (error) {
+      this.orders.set(order.id, order);
+      this.orderItems.set(order.id, itemSnapshot);
+      this.inventoryReservations.set(reservation.id, reservationSnapshot);
+      if (linkSnapshot) this.prescriptionOrderItems.set(linkSnapshot.id, linkSnapshot);
+      if (prescriptionSnapshot) this.prescriptions.set(prescriptionSnapshot.id, prescriptionSnapshot);
+      this.stockBatches.delete(quarantineBatch.id);
+      this.dispensingReversals.delete(input.idempotencyKey);
       this.stockMovements.length = movementCount;
       throw error;
     }

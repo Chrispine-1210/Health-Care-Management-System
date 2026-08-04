@@ -142,6 +142,11 @@ test('registered routes enforce authentication, permissions, ownership, and non-
     body: JSON.stringify({ reservationId: 'unknown-reservation', substituteBatchId: 'unknown-batch', idempotencyKey: 'substitute-auth-check', reason: 'Patient must not be able to alter pharmacy stock reservations.' }),
   });
   assert.equal(unauthorisedBatchSubstitution.status, 403);
+  const unauthorisedDispensingReversal = await request('/api/dispensing/unknown-record/reverse', patientA.token, {
+    method: 'POST',
+    body: JSON.stringify({ quantity: 1, idempotencyKey: 'reverse-auth-check', reason: 'Patient must not be able to reverse pharmacy dispensing evidence.' }),
+  });
+  assert.equal(unauthorisedDispensingReversal.status, 403);
   const cancellation = await request(`/api/orders/${cancellableOrder.order.id}/cancel`, patientA.token, {
     method: 'POST', headers: { 'idempotency-key': 'cancel-handler-001' },
     body: JSON.stringify({ reasonCode: 'CUSTOMER_REQUEST', reason: 'Customer requested cancellation before dispensing.' }),

@@ -105,6 +105,10 @@ const batchSubstitutionSchema = z.object({
   reservationId: z.string(), substituteBatchId: z.string(),
   idempotencyKey: z.string().min(8).max(128), reason: z.string().trim().min(20).max(2000),
 }).strict();
+const dispensingReversalSchema = z.object({
+  quantity: z.number().int().positive().max(10000),
+  idempotencyKey: z.string().min(8).max(128), reason: z.string().trim().min(20).max(2000),
+}).strict();
 
 const appointmentUpdateSchema = z.object({
   practitionerId: z.string().nullable().optional(),
@@ -808,6 +812,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid batch substitution request', issues: error.issues });
       logger.error('Batch substitution failed', { error });
       res.status(500).json({ message: 'Failed to substitute reservation batch' });
+    }
+  });
+
+  app.post('/api/dispensing/:dispensingRecordId/reverse', authenticateToken, requirePermission(PERMISSIONS.DISPENSING_REVERSE), async (req, res) => {
+    try {
+      const payload = dispensingReversalSchema.parse(req.body);
+      const result = await getStorage().reverseDispensing({ ...payload, dispensingRecordId: req.params.dispensingRecordId, actorId: req.user!.id, actorBranchId: req.user!.branchId ?? undefined, correlationId: res.locals.requestId }, buildAuditEvent(req, {
+        action: 'dispensing.reversed', entityType: 'dispensing_reversal',
+        changes: { dispensingRecordId: req.params.dispensingRecordId, quantity: payload.quantity, reason: payload.reason, actorRole: req.user!.role },
+      }));
+      res.json({ success: true, idempotentReplay: result.idempotentReplay, reversalId: result.reversal.id, quarantineBatchId: result.quarantineBatch.id, quantity: result.reversal.quantity, orderStatus: result.order.status });
+    } catch (error) {
+      if (error instanceof InvalidDispensingError) return res.status(error.code === 'NOT_FOUND' ? 404 : 409).json({ message: error.message });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid dispensing reversal request', issues: error.issues });
+      logger.error('Dispensing reversal failed', { error });
+      res.status(500).json({ message: 'Failed to reverse dispensing' });
     }
   });
 

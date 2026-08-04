@@ -481,6 +481,17 @@ export const dispensingRecords = pgTable("dispensing_records", {
 });
 export type DispensingRecord = typeof dispensingRecords.$inferSelect;
 
+export const dispensingReversals = pgTable("dispensing_reversals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dispensingRecordId: varchar("dispensing_record_id").notNull(), branchId: varchar("branch_id").notNull(),
+  orderId: varchar("order_id").notNull(), orderItemId: varchar("order_item_id").notNull(), reservationId: varchar("reservation_id").notNull(),
+  productId: varchar("product_id").notNull(), originalBatchId: varchar("original_batch_id").notNull(), quarantineBatchId: varchar("quarantine_batch_id").notNull(),
+  quantity: integer("quantity").notNull(), reason: text("reason").notNull(), performedBy: varchar("performed_by").notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull().unique(), correlationId: varchar("correlation_id", { length: 100 }),
+  reversedAt: timestamp("reversed_at").notNull().defaultNow(),
+});
+export type DispensingReversal = typeof dispensingReversals.$inferSelect;
+
 export const batchSubstitutions = pgTable("batch_substitutions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   branchId: varchar("branch_id").notNull(), orderId: varchar("order_id").notNull(), orderItemId: varchar("order_item_id").notNull(),

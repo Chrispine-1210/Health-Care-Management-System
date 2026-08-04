@@ -349,6 +349,44 @@ test('dispensing audit failure rolls back stock, reservation, item, and dispensi
   assert.equal((await storage.getStockMovements()).filter((movement) => movement.movementType === 'dispense').length, 0);
 });
 
+test('dispensing reversal quarantines returned stock and is idempotent', async () => {
+  const storage = new MemoryStorage();
+  const product = await storage.createProduct({ sku: 'OTC-RETURN', name: 'Return medicine', price: '10' });
+  const originalBatch = await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'RETURN-ORIGINAL', quantityOnHand: 5, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit({ customerId: 'patient-a', branchId: 'branch-a', subtotal: '30', total: '30' }, [{ productId: product.id, quantity: 3, unitPrice: '10', subtotal: '30' }], audit('order.created'));
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  const dispensed = await storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: created.items[0].id, reservationId: reservation.id, quantity: 2, actorId: 'pharmacist-a', idempotencyKey: 'dispense-before-return', counsellingCompleted: true }, audit('dispensing.completed'));
+  const input = { dispensingRecordId: dispensed.record.id, quantity: 1, actorId: 'pharmacist-a', actorBranchId: 'branch-a', reason: 'Customer returned sealed medicine for pharmacist inspection.', idempotencyKey: 'reverse-dispense-001' };
+  const reversal = await storage.reverseDispensing(input, audit('dispensing.reversed'));
+  assert.equal(reversal.quarantineBatch.status, 'quarantined');
+  assert.equal(reversal.quarantineBatch.quantityOnHand, 1);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).find((batch) => batch.id === originalBatch.id)?.quantityOnHand, 3);
+  assert.equal(reversal.reservation.quantityDispensed, 1);
+  assert.equal(reversal.reservation.quantityReleased, 1);
+  assert.equal(reversal.item.quantityDispensed, 1);
+  assert.equal((await storage.getStockMovements({ batchId: reversal.quarantineBatch.id }))[0].movementType, 'quarantine');
+  const replay = await storage.reverseDispensing(input, audit('dispensing.reversed'));
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).filter((batch) => batch.status === 'quarantined').length, 1);
+  await assert.rejects(storage.reverseDispensing({ ...input, quantity: 2 }, audit('dispensing.reversed')), /Idempotency key/);
+});
+
+test('dispensing reversal rolls back quarantine and workflow changes when audit fails', async () => {
+  const storage = new FailingAuditStorage();
+  storage.failAudit = false;
+  const product = await storage.createProduct({ sku: 'RETURN-ROLLBACK', name: 'Return rollback medicine', price: '10' });
+  await storage.createStockBatch({ productId: product.id, branchId: 'branch-a', batchNumber: 'RETURN-ROLLBACK', quantityOnHand: 2, expiryDate: new Date('2030-01-01T00:00:00.000Z'), costPrice: '5' });
+  const created = await storage.createOrderWithItemsAndAudit({ customerId: 'patient-a', branchId: 'branch-a', subtotal: '20', total: '20' }, [{ productId: product.id, quantity: 2, unitPrice: '10', subtotal: '20' }], audit('order.created'));
+  const reservation = (await storage.getReservationsByOrder(created.order.id))[0];
+  const dispensed = await storage.dispenseOrderItem({ orderId: created.order.id, orderItemId: created.items[0].id, reservationId: reservation.id, quantity: 1, actorId: 'pharmacist-a', idempotencyKey: 'return-rollback-dispense', counsellingCompleted: true }, audit('dispensing.completed'));
+  storage.failAudit = true;
+  await assert.rejects(storage.reverseDispensing({ dispensingRecordId: dispensed.record.id, quantity: 1, actorId: 'pharmacist-a', reason: 'Returned package requires quarantine and inspection.', idempotencyKey: 'return-rollback-reversal' }, audit('dispensing.reversed')), /deliberate audit failure/);
+  assert.equal((await storage.getReservationsByOrder(created.order.id))[0].quantityDispensed, 1);
+  assert.equal((await storage.getOrderItems(created.order.id))[0].quantityDispensed, 1);
+  assert.equal((await storage.getStockBatchesByProduct(product.id)).filter((batch) => batch.status === 'quarantined').length, 0);
+  assert.equal((await storage.getStockMovements()).filter((movement) => movement.movementType === 'quarantine').length, 0);
+});
+
 test('prescription revocation releases only the undispensed balance and preserves physical stock', async () => {
   const storage = new MemoryStorage();
   const product = await storage.createProduct({ sku: 'RX-REVOKE', name: 'Revocable medicine', price: '10', prescriptionRequired: true, prescriptionRequirement: 'prescription_required', requiresPharmacistApproval: true });
