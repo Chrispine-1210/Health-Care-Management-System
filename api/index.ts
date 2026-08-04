@@ -5,6 +5,19 @@ import { globalErrorHandler, notFoundHandler } from "../server/errorHandler";
 
 const app = express();
 app.disable("x-powered-by");
+
+// Vercel invokes this single function after rewriting /api/* to /api.
+// Restore the original API path before Express performs route matching.
+app.use((req, _res, next) => {
+  const url = new URL(req.url, 'https://internal.invalid');
+  const path = url.searchParams.get('__path');
+  if (path !== null) {
+    url.searchParams.delete('__path');
+    const query = url.searchParams.toString();
+    req.url = `/api/${path}${query ? `?${query}` : ''}`;
+  }
+  next();
+});
 app.use(corsHeaders);
 app.use(securityHeaders);
 app.use(correlationId);
