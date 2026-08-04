@@ -3,9 +3,10 @@ import path from 'node:path';
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
 
-if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
+const connectionString = process.env.VERCEL ? process.env.POSTGRES_URL || process.env.DATABASE_URL : process.env.DATABASE_URL;
+if (!connectionString) throw new Error('DATABASE_URL is required');
 neonConfig.webSocketConstructor = ws;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+const pool = new Pool({ connectionString, max: 1 });
 
 try {
   await pool.query("SELECT pg_advisory_lock(hashtext('thandizo_app_migrations'))");
