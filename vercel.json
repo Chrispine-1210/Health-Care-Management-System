@@ -34,10 +34,6 @@
   ],
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/api"
-    },
-    {
       "source": "/((?!api/.*|assets/.*|service-worker.js|manifest.json|favicon.png|browserconfig.xml).*)",
       "destination": "/index.html"
     }
