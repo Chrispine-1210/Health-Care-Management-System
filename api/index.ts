@@ -1,7 +1,7 @@
 import express from "express";
-import { registerRoutes } from "../server/routes";
-import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "../server/security";
-import { globalErrorHandler, notFoundHandler } from "../server/errorHandler";
+import { registerRoutes } from "../server/routes.js";
+import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "../server/security.js";
+import { globalErrorHandler, notFoundHandler } from "../server/errorHandler.js";
 
 const app = express();
 app.disable("x-powered-by");
