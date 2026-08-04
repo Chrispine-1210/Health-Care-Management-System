@@ -3,7 +3,7 @@
   "installCommand": "npm ci --include=dev",
   "buildCommand": "npm run db:migrate && npm run build",
   "outputDirectory": "dist/public",
-  "cleanUrls": true,
+  "cleanUrls": false,
   "trailingSlash": false,
   "headers": [
     {
