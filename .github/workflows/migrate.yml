@@ -1,0 +1,52 @@
+name: Controlled Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Protected GitHub Environment containing DATABASE_URL
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      confirmation:
+        description: Enter migrate-staging or migrate-production
+        type: string
+        required: true
+
+concurrency:
+  group: database-migration-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    name: Migrate ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.target }}
+    steps:
+      - name: Verify explicit confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED: migrate-${{ inputs.target }}
+        run: test "$CONFIRMATION" = "$EXPECTED"
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+      - name: Validate migration set
+        run: npm run migration:check
+      - name: Apply pending migrations once
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
+
