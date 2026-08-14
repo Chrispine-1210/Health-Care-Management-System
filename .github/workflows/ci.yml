@@ -4,9 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches:
-      - main
-      - "agent/**"
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -76,4 +74,3 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
       - name: Block critical development dependency vulnerabilities
         run: npm audit --audit-level=critical
-
