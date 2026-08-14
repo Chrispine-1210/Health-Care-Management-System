@@ -1,95 +1,74 @@
 # Testing Guide
 
-## API Testing
+Use synthetic data only. There are no shared “any password” demo accounts in production code, and credentials must never be documented in this repository.
 
-### Demo Accounts (Any Password)
-
-- `admin@thandizo.com` → Admin role
-- `pharmacist@thandizo.com` → Pharmacist role
-- `staff@thandizo.com` → Staff role
-- `customer@thandizo.com` → Customer role
-- `driver@thandizo.com` → Driver role
-
-### Manual Testing
-
-Use the `/debug` endpoint for manual API testing:
+## Automated validation
 
 ```bash
-# 1. Navigate to http://localhost:5000/debug
-# 2. Click buttons to test endpoints
-# 3. View responses in JSON panels
+npm ci
+npm run check
+npm test
+npm run migration:check
+npm run route-security:check
+npm run build
+npm audit --omit=dev --audit-level=high
 ```
 
-### cURL Examples
+The test suite covers authorization boundaries, persistent authentication, emergency access, audit behaviour, transaction rollback, inventory reservations, prescription dispensing, batch substitution, dispensing reversal and payment handling.
 
-```bash
-# Health check
-curl http://localhost:5000/health | jq
+## Test categories
 
-# Login
-curl -X POST http://localhost:5000/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"customer@thandizo.com","password":"test"}' | jq
+### Authentication and authorization
 
-# Get products (with JWT token)
-TOKEN="<jwt_from_login>"
-curl http://localhost:5000/api/products \
-  -H "Authorization: Bearer $TOKEN" | jq
+- Missing, invalid, expired and revoked tokens return the correct denial.
+- Public registration cannot create privileged roles.
+- Role assignment follows the role hierarchy.
+- Patient, order, appointment, delivery, payment and notification access respects ownership and permissions.
+- Cross-branch and cross-patient access is denied.
+- Emergency access is justified, time-limited and audited.
 
-# Create order
-curl -X POST http://localhost:5000/api/orders \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"items":[{"productId":"prod-1","quantity":1}],"latitude":-13.9626,"longitude":33.7741}' | jq
-```
+### Inventory and dispensing
 
-## Testing Checklist
+- Reservations cannot exceed saleable stock.
+- Concurrent operations preserve quantity invariants.
+- Dispensing is idempotent and linked to a valid reservation/prescription decision.
+- Batch substitution validates branch, product, expiry and quantity.
+- Reversal returns medication to quarantine, not saleable stock.
+- Partial failure rolls back all related writes.
 
-### Auth
-- [ ] Login works with demo accounts
-- [ ] JWT token stored in localStorage
-- [ ] Bearer token sent in Authorization header
-- [ ] 401 errors when token missing/invalid
-- [ ] Logout clears token
+### Data and audit
 
-### Products
-- [ ] Products endpoint returns data
-- [ ] Products filtered by category
-- [ ] Prescription requirement respected
+- Ordered migrations validate and do not silently mutate released files.
+- Sensitive state transitions emit immutable audit records.
+- Logs exclude tokens, passwords, connection strings and patient payloads.
+- Database-backed tests use an isolated disposable database, never staging or production.
 
-### Orders
-- [ ] Orders created successfully
-- [ ] Delivery cost calculated correctly
-- [ ] Order status updates work
-- [ ] Order history displayed
+### Client and PWA
 
-### Roles
-- [ ] Admin sees admin dashboard
-- [ ] Pharmacist sees prescription queue
-- [ ] Staff sees POS interface
-- [ ] Customer sees shop
-- [ ] Driver sees delivery routes
+- Critical role journeys work on supported desktop and mobile browsers.
+- Offline behaviour never exposes cached patient or API responses.
+- Service-worker upgrades remove obsolete caches.
+- Accessibility, form validation and error recovery are verified.
 
-### UI
-- [ ] Dark/light theme works
-- [ ] Responsive on mobile
-- [ ] Forms validate correctly
-- [ ] Error messages display
+## Manual staging smoke test
 
-## Performance Testing
+1. Confirm `/health` returns a healthy process result.
+2. Confirm `/ready` succeeds with the staging database and fails safely when a required dependency is unavailable.
+3. Validate login/logout and one denied access path per role.
+4. Create a synthetic prescription order, reserve stock, approve, dispense and reconcile the ledger.
+5. Reverse a synthetic dispensing event and confirm quarantine stock plus audit evidence.
+6. Exercise payment failure and retry without duplicate charging.
+7. Review logs for correlation IDs and absence of sensitive bodies.
 
-```bash
-# Load test (requires Apache Bench)
-ab -n 1000 -c 10 http://localhost:5000/api/products
+Record commit SHA, environment, tester, timestamp and evidence for every release candidate.
 
-# Check response times
-curl -w "@curl-format.txt" http://localhost:5000/health
-```
+## Performance testing
 
-## Logs
+Run load tests only against an isolated environment with synthetic records. Model authentication, product search, order placement, prescription queues and readiness checks separately. Define pass/fail thresholds before testing; raw request volume without latency and error budgets is not an acceptance criterion.
 
-Check the dev console for logs:
-- Timestamps and levels
-- API request/response details
-- Error stack traces
-- Database operations
+## Security testing
+
+- Run CodeQL, dependency review, npm audit and secret scanning in GitHub Actions.
+- Test IDOR/BOLA, privilege escalation, injection, replay/idempotency and file-upload abuse where applicable.
+- Complete an independent penetration test before production use with real patient or payment data.
+

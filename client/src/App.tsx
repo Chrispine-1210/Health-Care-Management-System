@@ -15,8 +15,6 @@ import SignupNew from "@/pages/signup-new";
 import DebugTest from "@/pages/debug-test";
 import EmailDemo from "@/pages/email-demo";
 import CustomerHome from "@/pages/customer/home";
-import SignInDemo from "@/pages/auth/sign-in-updated";
-import SignUp from "@/pages/auth/sign-up";
 import CustomerShop from "@/pages/customer/shop";
 import CustomerOrders from "@/pages/customer/orders";
 import CustomerOrderDetail from "@/pages/customer/order-detail";
@@ -99,8 +97,8 @@ function Router() {
         <Route path="/" component={Landing} />
         <Route path="/login" component={LoginNew} />
         <Route path="/signup" component={SignupNew} />
-        <Route path="/sign-in" component={SignInDemo} />
-        <Route path="/sign-up" component={SignUp} />
+        <Route path="/sign-in" component={LoginNew} />
+        <Route path="/sign-up" component={SignupNew} />
         <Route>
           <Redirect to="/login" />
         </Route>

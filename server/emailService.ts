@@ -111,13 +111,14 @@ class EmailService {
    * Welcome email template
    */
   createWelcomeTemplate(firstName: string, email: string, role: string): EmailTemplate {
-    const roleMessage = {
+    const roleMessages: Record<string, string> = {
       admin: 'You now have full system access to manage pharmacy operations.',
       pharmacist: 'You can now review prescriptions and manage clinical workflows.',
       staff: 'You can now process orders and manage point-of-sale operations.',
       customer: 'You can now browse products and place orders online.',
       driver: 'You can now view delivery assignments and track routes.',
-    }[role as keyof typeof roleMessage] || 'Welcome to Thandizo Pharmacy.';
+    };
+    const roleMessage = roleMessages[role] || 'Welcome to Thandizo Pharmacy.';
 
     const html = this.wrapWithLetterhead(
       `

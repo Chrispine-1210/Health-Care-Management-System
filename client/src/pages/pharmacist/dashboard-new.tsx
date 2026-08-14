@@ -51,7 +51,7 @@ export default function PharmacistDashboardNew() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
     }
   }, [isAuthenticated, isPharmacist, authLoading, toast]);
@@ -94,7 +94,7 @@ export default function PharmacistDashboardNew() {
             <Button 
               variant="outline" 
               className="border-blue-500 text-blue-600 hover:bg-blue-50"
-              onClick={simulateInteractionCheck}
+              onClick={() => void checkInteractions([])}
               disabled={isAIInteractionChecking}
             >
               <AlertCircle className={`h-4 w-4 mr-2 ${isAIInteractionChecking ? "animate-spin" : ""}`} />

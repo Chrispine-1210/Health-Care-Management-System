@@ -1,5 +1,5 @@
 import type { RequestHandler } from 'express';
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { logger } from './logger';
 
 interface RateLimitStore {
@@ -101,12 +101,21 @@ export async function verifyPassword(password: string, hashed: string): Promise<
 }
 
 export const securityHeaders: RequestHandler = (_req, res, next) => {
+  const scriptSource = process.env.NODE_ENV === 'development' ? "'self' 'unsafe-inline'" : "'self'";
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '0');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https: wss:");
+  res.setHeader('Content-Security-Policy', `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; script-src ${scriptSource}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https: wss:`);
+  next();
+};
+
+export const correlationId: RequestHandler = (req, res, next) => {
+  const supplied = req.headers['x-request-id'];
+  const requestId = typeof supplied === 'string' && /^[A-Za-z0-9._-]{8,100}$/.test(supplied) ? supplied : randomUUID();
+  res.locals.requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
   next();
 };

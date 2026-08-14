@@ -1,0 +1,60 @@
+name: Bug or regression
+description: Report a reproducible defect using synthetic data only.
+title: "[Bug] "
+labels: [triage, bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, real patient information, private logs or exploit details. Use the Security policy for vulnerabilities.
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Proposed priority
+      options:
+        - P0 - Security, patient safety, corruption, or outage
+        - P1 - High operational or revenue impact
+        - P2 - Material defect with workaround
+        - P3 - Minor defect
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, where, and for which role or workflow?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Safe reproduction
+      description: Give deterministic steps using synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour and invariant
+      description: State the expected outcome and any patient, authorization, stock, payment or audit invariant.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Cover patient, security/privacy, operational, inventory and financial impact.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v1.2.3 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Remove credentials, tokens, connection strings, patient data and payment data.
+

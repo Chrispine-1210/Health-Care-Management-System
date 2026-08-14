@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { User, LogOut } from "lucide-react";
 
 export default function ProfilePage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, signOut } = useAuth();
 
   if (isLoading) {
     return (
@@ -82,11 +82,9 @@ export default function ProfilePage() {
                   Edit Profile
                 </Button>
               </a>
-              <Button asChild variant="destructive" className="w-full" data-testid="button-logout">
-                <a href="/api/logout">
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </a>
+              <Button variant="destructive" className="w-full" data-testid="button-logout" onClick={() => void signOut()}>
+                <LogOut className="h-4 w-4 mr-2" />
+                Logout
               </Button>
             </div>
           </CardContent>

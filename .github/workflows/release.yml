@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Verify and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify tag matches package version
+        run: node -e "const p=require('./package.json'); if ('v'+p.version !== process.env.GITHUB_REF_NAME) { throw new Error('Tag must match package.json version') }"
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+      - name: Run release gates
+        run: |
+          npm run check
+          npm test
+          npm run migration:check
+          npm run route-security:check
+          npm audit --omit=dev --audit-level=high
+          npm run build
+      - name: Create deployment bundle and checksum
+        run: |
+          mkdir -p release
+          tar -czf "release/thandizo-${GITHUB_REF_NAME}.tar.gz" dist api/vercel-handler.js migrations scripts/run-migrations.mjs package.json package-lock.json env.example vercel.json
+          sha256sum "release/thandizo-${GITHUB_REF_NAME}.tar.gz" > "release/thandizo-${GITHUB_REF_NAME}.sha256"
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified assets
+        uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}
+          path: release
+      - name: Create immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes --title "Thandizo ${GITHUB_REF_NAME}"
+

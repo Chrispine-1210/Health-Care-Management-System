@@ -27,7 +27,7 @@ export default function CheckoutPage() {
     paymentMethod: "cash",
   });
 
-  const createOrderMutation = useMutation({
+  const createOrderMutation = useMutation<Response, Error, Record<string, unknown>>({
     mutationFn: async (orderData) => {
       return apiRequest("/api/orders", {
         method: "POST",

@@ -1,38 +1,53 @@
-name: Thandizo Pharmacy Engineering Workstream
-about: Production stabilization issue for security, patient safety, inventory, notifications, performance, or operations.
-title: "[P0] Replace with clear, technical, actionable title"
+name: Engineering work item
+description: Plan a security, patient-safety, inventory, platform or operational change.
+title: "[Work] "
 labels: [triage]
 body:
   - type: dropdown
     id: priority
     attributes:
-      label: Priority tag
+      label: Priority
       options:
-        - P0 - Critical / Immediate Risk
-        - P1 - High Impact
-        - P2 - Medium Priority / Optimization
-        - P3 - Enhancement / Future Scale
+        - P0 - Critical or immediate risk
+        - P1 - High impact
+        - P2 - Material improvement
+        - P3 - Enhancement or future scale
+    validations:
+      required: true
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Workstream
+      options:
+        - Security and identity
+        - Patient and clinical workflows
+        - Inventory and dispensing
+        - Orders, payments and delivery
+        - Data, migrations and audit
+        - Platform, reliability and observability
+        - User experience and accessibility
+        - Compliance and operational readiness
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
       label: Problem statement
-      description: Describe the concrete operational, security, patient safety, data integrity, or performance gap.
+      description: Describe the concrete operational, security, patient-safety, data-integrity or performance gap.
     validations:
       required: true
   - type: textarea
     id: impact
     attributes:
       label: Impact analysis
-      description: Cover patient impact, pharmacy impact, and system impact.
+      description: Cover patient, pharmacy, system, inventory, privacy and financial impact.
     validations:
       required: true
   - type: textarea
-    id: technical_solution
+    id: scope
     attributes:
-      label: Technical solution proposal
-      description: Include backend, frontend, infra, data, and audit logging implications where applicable.
+      label: Scope and non-goals
+      description: Define what will change and what is deliberately excluded.
     validations:
       required: true
   - type: textarea
@@ -42,11 +57,32 @@ body:
       description: Use measurable, testable criteria.
     validations:
       required: true
+  - type: textarea
+    id: safety_security
+    attributes:
+      label: Safety, security and data analysis
+      description: Cover authorization, patient data, stock/dispensing, payments, audit evidence and regulatory implications.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Test and validation plan
+      description: Include positive, denied, failure/rollback, migration and staging evidence as applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback and monitoring plan
+      description: Define recovery actions, irreversible data risks and production acceptance signals.
+    validations:
+      required: true
   - type: input
     id: dependencies
     attributes:
       label: Dependencies
-      placeholder: Related issues, providers, credentials, migrations, APIs, or infrastructure.
+      placeholder: Related issues, providers, migrations, APIs or infrastructure.
     validations:
       required: true
   - type: dropdown
@@ -54,16 +90,10 @@ body:
     attributes:
       label: Estimated effort
       options:
-        - S - 0.5-1 day
-        - M - 2-3 days
-        - L - 4-7 days
-        - XL - 2+ weeks
+        - S - 0.5 to 1 day
+        - M - 2 to 3 days
+        - L - 4 to 7 days
+        - XL - 2 or more weeks
     validations:
       required: true
-  - type: input
-    id: labels
-    attributes:
-      label: Labels
-      placeholder: security, backend, frontend, infra, data, clinical, notifications
-    validations:
-      required: true
+

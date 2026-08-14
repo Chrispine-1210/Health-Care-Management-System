@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AlertCircle, Lock, Bell, Shield, LogOut, Camera } from "lucide-react";
 
 export default function AccountSettings() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { toast } = useToast();
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -265,7 +265,7 @@ export default function AccountSettings() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Button variant="destructive" className="w-full" data-testid="button-logout">
+                <Button variant="destructive" className="w-full" data-testid="button-logout" onClick={() => void signOut()}>
                   <LogOut className="h-4 w-4 mr-2" />
                   Logout
                 </Button>

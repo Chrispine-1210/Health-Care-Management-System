@@ -1,5 +1,6 @@
 import type { Express } from 'express';
-import { authenticateToken, requireRole } from './authMiddleware';
+import { authenticateToken, requirePermission } from './authMiddleware';
+import { PERMISSIONS } from '@shared/healthcareAccess';
 import { notificationService } from './notificationService';
 import { letterheadService } from './letterheadService';
 import { getStorage } from './storageManager';
@@ -45,7 +46,7 @@ export function registerEmailRoutes(app: Express) {
    * POST /api/email/send
    * Send direct email
    */
-  app.post('/api/email/send', authenticateToken, requireRole('admin', 'pharmacist'), async (req, res) => {
+  app.post('/api/email/send', authenticateToken, requirePermission(PERMISSIONS.NOTIFICATION_SEND), async (req, res) => {
     try {
       const payload = sendEmailSchema.parse(req.body);
       const { emailService } = await import('./emailService');
@@ -67,7 +68,7 @@ export function registerEmailRoutes(app: Express) {
    * POST /api/notifications/send
    * Send notification (email with template)
    */
-  app.post('/api/notifications/send', authenticateToken, async (req, res) => {
+  app.post('/api/notifications/send', authenticateToken, requirePermission(PERMISSIONS.NOTIFICATION_SEND), async (req, res) => {
     try {
       const payload = sendNotificationSchema.parse(req.body);
       const user = await getStorage().getUser(payload.userId);
@@ -78,8 +79,8 @@ export function registerEmailRoutes(app: Express) {
 
       const success = await notificationService.send({
         userId: payload.userId,
-        userEmail: user.email,
-        firstName: user.firstName,
+        userEmail: user.email ?? '',
+        firstName: user.firstName ?? '',
         type: payload.type,
         data: payload.data,
       });
@@ -99,7 +100,7 @@ export function registerEmailRoutes(app: Express) {
    * POST /api/documents/prescription-letter
    * Generate prescription letter (returns HTML)
    */
-  app.post('/api/documents/prescription-letter', authenticateToken, requireRole('pharmacist', 'admin'), async (req, res) => {
+  app.post('/api/documents/prescription-letter', authenticateToken, requirePermission(PERMISSIONS.PRESCRIPTION_READ), async (req, res) => {
     try {
       const payload = generatePrescriptionLetterSchema.parse(req.body);
       const html = letterheadService.generatePrescriptionLetter(payload);
@@ -116,7 +117,7 @@ export function registerEmailRoutes(app: Express) {
    * POST /api/documents/invoice
    * Generate invoice letterhead
    */
-  app.post('/api/documents/invoice', authenticateToken, requireRole('staff', 'admin'), async (req, res) => {
+  app.post('/api/documents/invoice', authenticateToken, requirePermission(PERMISSIONS.ORDER_MANAGE), async (req, res) => {
     try {
       const payload = z
         .object({
@@ -142,7 +143,7 @@ export function registerEmailRoutes(app: Express) {
    * POST /api/documents/delivery-note
    * Generate delivery note
    */
-  app.post('/api/documents/delivery-note', authenticateToken, requireRole('driver', 'admin'), async (req, res) => {
+  app.post('/api/documents/delivery-note', authenticateToken, requirePermission(PERMISSIONS.DELIVERY_READ), async (req, res) => {
     try {
       const payload = z
         .object({

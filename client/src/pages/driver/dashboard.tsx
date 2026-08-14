@@ -27,7 +27,7 @@ export default function DriverDashboard() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
     }
   }, [isAuthenticated, isDriver, authLoading, toast]);
@@ -151,7 +151,7 @@ export default function DriverDashboard() {
                   data-testid={`delivery-item-${delivery.id}`}
                 >
                   <Avatar className="h-12 w-12">
-                    <AvatarImage src={delivery.customer?.profileImageUrl} />
+                    <AvatarImage src={delivery.customer?.profileImageUrl ?? undefined} />
                     <AvatarFallback className="bg-primary text-primary-foreground">
                       {delivery.customer?.firstName?.[0] || 'C'}
                     </AvatarFallback>

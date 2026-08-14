@@ -1,6 +1,15 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
 
+export interface ConversationSummary {
+  id: string;
+  participantIds: string[];
+  lastMessage?: string;
+  updatedAt?: string;
+  unread: number;
+  online: boolean;
+}
+
 /**
  * Notifications hook - Real-time notifications
  */

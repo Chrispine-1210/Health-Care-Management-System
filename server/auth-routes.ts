@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { authService } from './authSystem';
-import { authenticateToken, requireRole } from './authMiddleware';
+import { authenticateToken, requirePermission } from './authMiddleware';
+import { PERMISSIONS } from '@shared/healthcareAccess';
 import { logger } from './logger';
 import { z } from 'zod';
 
@@ -82,7 +83,7 @@ export function registerAuthRoutes(app: Express) {
    * POST /api/auth/admin/users
    * Admin-only creation of privileged staff accounts.
    */
-  app.post('/api/auth/admin/users', authenticateToken, requireRole('admin'), async (req, res) => {
+  app.post('/api/auth/admin/users', authenticateToken, requirePermission(PERMISSIONS.STAFF_MANAGE_SYSTEM), async (req, res) => {
     try {
       const { email, password, role, firstName, lastName } = adminRegisterSchema.parse(req.body);
       const result = await authService.register(email, password, role, firstName, lastName);
@@ -100,11 +101,11 @@ export function registerAuthRoutes(app: Express) {
    * POST /api/auth/refresh
    * Refresh access token
    */
-  app.post('/api/auth/refresh', (req, res) => {
+  app.post('/api/auth/refresh', async (req, res) => {
     try {
       const { refreshToken } = refreshSchema.parse(req.body);
 
-      const result = authService.refreshAccessToken(refreshToken);
+      const result = await authService.refreshAccessToken(refreshToken);
       if (!result) {
         return res.status(401).json({ success: false, message: 'Invalid refresh token' });
       }
@@ -139,6 +140,18 @@ export function registerAuthRoutes(app: Express) {
     }
   });
 
+  // Compatibility endpoint retained for existing clients while enforcing the
+  // same authenticated server-side session revocation as the canonical route.
+  app.post('/api/logout', authenticateToken, (req, res) => {
+    try {
+      authService.logout(req.user!.id);
+      res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+      logger.error('Logout error', { error });
+      res.status(500).json({ success: false, message: 'Logout failed' });
+    }
+  });
+
   /**
    * GET /api/auth/me
    * Get current user info
@@ -160,7 +173,7 @@ export function registerAuthRoutes(app: Express) {
    * GET /api/auth/sessions (Admin only)
    * List all active sessions
    */
-  app.get('/api/auth/sessions', authenticateToken, requireRole('admin'), (req, res) => {
+  app.get('/api/auth/sessions', authenticateToken, requirePermission(PERMISSIONS.AUDIT_LOG_VIEW), (req, res) => {
     const sessions = authService.getAllSessions();
     res.json({
       success: true,

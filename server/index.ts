@@ -1,17 +1,24 @@
 // server/index.ts
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedTestData } from "./testData";
-import { setupAuth, isAuthenticated, requireRole } from "./auth";
-import { corsHeaders, securityHeaders, sanitizeRequest, rateLimit } from "./security";
+import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { inventoryIntelligenceService } from "./inventoryIntelligence";
+import { pool } from "./db";
+import { validateProductionEnvironment } from "./config";
+import { globalErrorHandler, notFoundHandler } from "./errorHandler";
+
+validateProductionEnvironment();
 
 const app = express();
 app.disable("x-powered-by");
 app.use(corsHeaders);
 app.use(securityHeaders);
+app.use(correlationId);
 app.use(rateLimit());
+app.use('/api/auth/login', rateLimit(15 * 60 * 1000, 10));
+app.use('/api/auth/register', rateLimit(60 * 60 * 1000, 5));
 
 declare module "http" {
   interface IncomingMessage {
@@ -24,12 +31,13 @@ declare module "http" {
 // ──────────────────────────────
 app.use(
   express.json({
+    limit: '1mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   })
 );
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(sanitizeRequest);
 
 // ──────────────────────────────
@@ -38,21 +46,10 @@ app.use(sanitizeRequest);
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
       if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
       log(logLine);
     }
@@ -66,22 +63,11 @@ app.use((req, res, next) => {
 // ──────────────────────────────
 (async () => {
   // Seed test data
-  await seedTestData();
-
-  // Setup authentication & sessions
-  await setupAuth(app);
+  if (process.env.NODE_ENV === 'development') await seedTestData();
 
   // Start inventory automation and register routes
   inventoryIntelligenceService.startDailyScheduler();
   const server = await registerRoutes(app);
-
-  // GLOBAL ERROR HANDLER
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
-    throw err;
-  });
 
   // Vite dev server or production static
   if (app.get("env") === "development") {
@@ -90,16 +76,26 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
+  app.use(notFoundHandler);
+  app.use(globalErrorHandler);
+
   // START SERVER
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
     },
     () => {
       log(`Server running on port ${port}`);
     }
   );
+
+  const shutdown = (signal: string) => {
+    log(`${signal} received; shutting down`);
+    server.close(() => void pool.end().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 })();

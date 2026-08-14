@@ -1,8 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci --include=dev",
   "buildCommand": "npm run build",
   "outputDirectory": "dist/public",
-  "cleanUrls": true,
+  "cleanUrls": false,
   "trailingSlash": false,
   "headers": [
     {
@@ -32,9 +33,31 @@
     }
   ],
   "rewrites": [
-    {
-      "source": "/((?!api/.*|assets/.*|service-worker.js|manifest.json|favicon.png|browserconfig.xml).*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/:path*", "destination": "/api?__path=:path*" },
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/signup", "destination": "/index.html" },
+    { "source": "/sign-in", "destination": "/index.html" },
+    { "source": "/sign-up", "destination": "/index.html" },
+    { "source": "/shop", "destination": "/index.html" },
+    { "source": "/cart", "destination": "/index.html" },
+    { "source": "/checkout", "destination": "/index.html" },
+    { "source": "/orders/:path*", "destination": "/index.html" },
+    { "source": "/prescriptions/:path*", "destination": "/index.html" },
+    { "source": "/consultations", "destination": "/index.html" },
+    { "source": "/profile/:path*", "destination": "/index.html" },
+    { "source": "/admin/:path*", "destination": "/index.html" },
+    { "source": "/pharmacist/:path*", "destination": "/index.html" },
+    { "source": "/staff/:path*", "destination": "/index.html" },
+    { "source": "/driver/:path*", "destination": "/index.html" },
+    { "source": "/performance/:path*", "destination": "/index.html" },
+    { "source": "/portfolio/:path*", "destination": "/index.html" },
+    { "source": "/settings/:path*", "destination": "/index.html" },
+    { "source": "/verification/:path*", "destination": "/index.html" },
+    { "source": "/pos", "destination": "/index.html" },
+    { "source": "/role-tester", "destination": "/index.html" },
+    { "source": "/role-test", "destination": "/index.html" },
+    { "source": "/debug", "destination": "/index.html" },
+    { "source": "/email-demo", "destination": "/index.html" }
   ]
 }
+

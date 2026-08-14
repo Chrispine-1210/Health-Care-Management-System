@@ -46,16 +46,17 @@ export class InventoryIntelligenceService {
       const expiryMs = new Date(batch.expiryDate).getTime() - now;
       const daysToExpiry = Math.ceil(expiryMs / (1000 * 60 * 60 * 24));
 
-      if (batch.quantity <= DEFAULT_LOW_STOCK_THRESHOLD) {
+      const quantityAvailable = batch.quantityOnHand - batch.quantityReserved;
+      if (quantityAvailable <= DEFAULT_LOW_STOCK_THRESHOLD) {
         alerts.push({
           id: `low-${batch.id}`,
           type: 'low-stock',
-          severity: batch.quantity <= 0 ? 'critical' : 'high',
+          severity: quantityAvailable <= 0 ? 'critical' : 'high',
           productId: batch.productId,
           branchId: batch.branchId,
           batchId: batch.id,
-          message: `${productName} is at ${batch.quantity} units, below threshold ${DEFAULT_LOW_STOCK_THRESHOLD}.`,
-          suggestedAction: `Reorder ${Math.max(DEFAULT_LOW_STOCK_THRESHOLD * 2 - batch.quantity, DEFAULT_LOW_STOCK_THRESHOLD)} units from ${batch.supplierName || 'preferred supplier'}.`,
+          message: `${productName} has ${quantityAvailable} available units, below threshold ${DEFAULT_LOW_STOCK_THRESHOLD}.`,
+          suggestedAction: `Reorder ${Math.max(DEFAULT_LOW_STOCK_THRESHOLD * 2 - quantityAvailable, DEFAULT_LOW_STOCK_THRESHOLD)} units from ${batch.supplierName || 'preferred supplier'}.`,
           createdAt: new Date().toISOString(),
         });
       }
@@ -74,7 +75,7 @@ export class InventoryIntelligenceService {
         });
       }
 
-      if (batch.quantity >= DEFAULT_OVERSTOCK_THRESHOLD) {
+      if (quantityAvailable >= DEFAULT_OVERSTOCK_THRESHOLD) {
         alerts.push({
           id: `overstock-${batch.id}`,
           type: 'overstock',
@@ -82,7 +83,7 @@ export class InventoryIntelligenceService {
           productId: batch.productId,
           branchId: batch.branchId,
           batchId: batch.id,
-          message: `${productName} has ${batch.quantity} units, above overstock threshold ${DEFAULT_OVERSTOCK_THRESHOLD}.`,
+          message: `${productName} has ${quantityAvailable} available units, above overstock threshold ${DEFAULT_OVERSTOCK_THRESHOLD}.`,
           suggestedAction: 'Pause reorder, transfer stock to branches with demand, or run controlled promotion.',
           createdAt: new Date().toISOString(),
         });

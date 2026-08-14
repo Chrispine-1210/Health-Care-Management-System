@@ -1,250 +1,164 @@
-# Thandizo Pharmacy - Cross-Platform Healthcare Management System
+# Thandizo Healthcare Management System
 
-A comprehensive pharmacy management platform for Thandizo Pharmacy in Malawi, available on Web, Android, iOS, and Desktop (Windows/Mac/Linux).
+[![Quality Gate](https://github.com/Chrispine-1210/Health-Care-Management-System/actions/workflows/ci.yml/badge.svg)](https://github.com/Chrispine-1210/Health-Care-Management-System/actions/workflows/ci.yml)
+[![Security](https://github.com/Chrispine-1210/Health-Care-Management-System/actions/workflows/security.yml/badge.svg)](https://github.com/Chrispine-1210/Health-Care-Management-System/actions/workflows/security.yml)
 
-## Features
+Thandizo is a TypeScript healthcare and pharmacy operations platform designed for the Malawian market. It combines prescription workflows, branch-level inventory, order fulfilment, payments, delivery coordination, role-based access and auditable clinical operations in one codebase.
 
-### Multi-Platform Support
-- **Web**: Progressive Web App (PWA) - installable on any device
-- **Android**: APK + Play Store - native Android app
-- **iOS**: App Store - native iOS app  
-- **Desktop**: Electron - Windows, Mac, Linux desktop app
+> **Pre-production status:** this repository is under active hardening. It is not certified as a medical device, pharmacy regulatory system, or data-protection compliance solution. Do not process real patient data until the release gates, infrastructure review, credential rotation and regulatory assessment are complete.
 
-### Core Features
-- **Medication Management**: Browse, search, and order medications
-- **Prescription Management**: Upload, review, and track prescriptions
-- **Multi-Role System**: Admin, Pharmacist, Staff, Customer, Driver
-- **Order Management**: Place orders, track deliveries, manage payments
-- **Malawi-Specific Mobile Money**: Airtel Money, TNM Mpamba integration
-- **Real-Time Tracking**: GPS-enabled delivery tracking
-- **Offline Support**: Service worker enables offline functionality
-- **Healthcare Dashboard**: Performance metrics and merit badges
+## Current delivery posture
 
-## Installation
+| Area | Current state | Release expectation |
+| --- | --- | --- |
+| Web/PWA | Implemented | Validate browser, offline and cache behaviour in staging |
+| Express API | Implemented | Deploy with PostgreSQL and production secrets |
+| Vercel preview | Supported through a serverless adapter | Use for review; persistent Node hosting is preferred for high-assurance production operations |
+| Desktop shell | Electron source present | Packaging and signing are not currently automated |
+| Native Android/iOS | Not implemented | PWA only; do not represent it as a native application |
+| Automated tests | Authorization, transactions, audit, payment and safety workflows covered | All tests must pass before merge or release |
+| Production certification | Not completed | Independent security, privacy, clinical-safety and regulatory review required |
 
-### Web/PWA
-1. Visit `https://thandizo-pharmacy.replit.dev`
-2. Click "Install" in browser or share menu
-3. App installs on home screen (Android/iOS) or as desktop app (Windows/Mac)
+## Operational capabilities
 
-### Desktop (Electron)
-```bash
-npm run electron-pack
-# Creates installers in dist/electron/
-# - Windows: NSIS installer
-# - Mac: DMG installer
-# - Linux: AppImage + deb package
-```
+- Multi-role access for administrators, pharmacists, staff, customers and drivers.
+- Multi-branch product, batch, expiry and stock management.
+- Inventory reservation, stock movement ledger and controlled adjustments.
+- Prescription review, dispensing, batch substitution and dispensing reversal.
+- Quarantine handling for returned medicine so reversed stock is not silently resold.
+- Orders, cancellations, payments, deliveries and appointment workflows.
+- Emergency-access grants with expiry, justification and audit evidence.
+- Immutable audit-log controls and correlation-aware structured logging.
+- Health and readiness probes for deployment monitoring.
+- Malawi-oriented Airtel Money and TNM Mpamba payment abstractions.
 
-### Android (APK)
-```bash
-npm run electron-build
-# Use Electron builder or build APK from web manifest
-```
+## Safety and security invariants
 
-## Development
+The following rules are release blockers:
 
-### Setup
-```bash
-npm install
-npm run dev          # Start web development server
-npm run electron-dev # Start Electron development
-npm run db:push      # Initialize database
-```
+1. A user may access only records allowed by their role, ownership and branch scope.
+2. Patient-data access requires authorization or a valid, time-limited emergency-access grant.
+3. Stock changes, dispensing, reversals and substitutions must remain transactional and auditable.
+4. Returned medication must enter quarantine and must not restore saleable stock automatically.
+5. Every sensitive operation must produce a non-secret audit event without logging patient payloads.
+6. Secrets, production credentials and real patient data must never be committed to Git.
+7. Database migrations must run once through a controlled environment, never automatically from every preview build.
 
-### Scripts
-- `npm run dev` - Development server (Vite + Express)
-- `npm run build` - Production build
-- `npm run start` - Production server
-- `npm run electron` - Build and launch Electron app
-- `npm run electron-dev` - Dev with hot reload
-- `npm run electron-pack` - Package for distribution
-- `npm run db:push` - Database schema push
+See [SECURITY.md](SECURITY.md), [Quality Gates](docs/QUALITY_GATES.md) and [Release Process](docs/RELEASE_PROCESS.md).
 
 ## Architecture
 
-### Tech Stack
-- **Frontend**: React 18, TypeScript, Tailwind CSS, Shadcn UI
-- **Backend**: Express.js, TypeScript, PostgreSQL, Drizzle ORM
-- **Mobile**: PWA (Web), Electron (Desktop)
-- **Auth**: Replit Auth with OIDC
-- **Payments**: Malawi Mobile Money (Airtel, TNM Mpamba), Stripe
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Client | React 18, TypeScript, Vite, TanStack Query, Tailwind | Role-specific web/PWA experiences |
+| API | Express, TypeScript, Zod | Authentication, authorization and operational workflows |
+| Data | PostgreSQL/Neon, Drizzle schemas, ordered SQL migrations | Durable business, inventory and audit records |
+| Security | Bearer authentication, permissions, revocation, emergency access, encryption and audit services | Access enforcement and evidence |
+| Delivery | Vercel adapter or persistent Node runtime | Preview and production execution surfaces |
 
-### Project Structure
-```
-├── client/
-│   ├── src/
-│   │   ├── components/       # Reusable components
-│   │   ├── pages/            # Page components by role
-│   │   ├── hooks/            # Custom React hooks
-│   │   ├── lib/              # Utilities and API client
-│   │   └── main.tsx          # React entry point
-│   └── public/               # Static assets & manifest
-├── server/
-│   ├── index.ts              # Express server
-│   ├── routes.ts             # API endpoints
-│   ├── storage.ts            # Database operations
-│   ├── payment-gateway.ts    # Payment processing
-│   └── replitAuth.ts         # Authentication
-├── shared/
-│   └── schema.ts             # Database schema & types
-├── electron-main.ts          # Electron main process
-├── preload.ts                # Electron preload script
-└── vite.config.ts            # Build configuration
-```
+Detailed boundaries and data flows are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Database
+## Local development
 
-### Schema
-- Users (multi-role: admin, pharmacist, staff, customer, driver)
-- Branches (pharmacy locations)
-- Products (medication catalog)
-- Stock Batches (inventory with batch numbers)
-- Orders & Order Items
-- Prescriptions (digital prescription management)
-- Deliveries (GPS tracking)
-- Appointments (teleconsultations)
-- Content (health articles/blog)
-- Audit Logs (compliance tracking)
+### Prerequisites
 
-### Migrations
+- Node.js 24
+- npm with lockfile support
+- PostgreSQL for database-backed workflows
+
+### Setup
+
 ```bash
-npm run db:push       # Apply schema changes
-npm run db:push --force  # Force apply (careful!)
+git clone https://github.com/Chrispine-1210/Health-Care-Management-System.git
+cd Health-Care-Management-System
+cp env.example .env
+npm ci
+npm run migration:check
+npm run db:migrate
+npm run dev
 ```
 
-## API Endpoints
+Use synthetic test data only. Replace every placeholder in `.env`; never reuse staging or production secrets locally.
 
-### Authentication
-- `GET /api/auth/user` - Get current user
-- `GET /api/login` - Initiate login
-- `POST /api/logout` - Logout
+### Required commands
 
-### Products & Inventory
-- `GET /api/products` - List all products
-- `GET /api/products/featured` - Featured products
-- `GET /api/products/categories` - Product categories
-- `GET /api/products/:id` - Product details
-- `GET /api/admin/inventory` - All stock batches
-- `GET /api/inventory/low-stock` - Low stock alerts
-- `GET /api/inventory/expiring` - Expiring items
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the development server |
+| `npm run check` | Run TypeScript validation |
+| `npm test` | Run automated tests |
+| `npm run route-security:check` | Verify the route-security register is current |
+| `npm run migration:check` | Validate ordered, immutable migration files |
+| `npm run build` | Build client, service worker, Node server and Vercel adapter |
+| `npm audit --omit=dev --audit-level=high` | Block high/critical runtime dependency vulnerabilities |
+| `npm run db:migrate` | Apply pending migrations to the explicitly configured database |
 
-### Orders
-- `POST /api/orders` - Create order
-- `GET /api/orders` - Get user's orders
-- `GET /api/orders/:id` - Order details
-- `PATCH /api/orders/:id` - Update order
-- `PATCH /api/orders/:id/approve` - Approve order (staff)
-- `PATCH /api/orders/:id/reject` - Reject order (staff)
+Before opening a pull request, run:
 
-### Prescriptions
-- `GET /api/prescriptions/pending` - Pending prescriptions (pharmacist)
-- `GET /api/prescriptions/patient/:id` - Patient prescriptions
-- `POST /api/prescriptions` - Upload prescription
-- `PATCH /api/prescriptions/:id/review` - Review/approve (pharmacist)
-
-### Payments
-- `POST /api/payments/process` - Process mobile money payment
-- `GET /api/payments/check/:transactionId` - Check payment status
-- `GET /api/payments/operators/:phoneNumber` - Supported operators
-
-### Deliveries
-- `GET /api/driver/deliveries/active` - Active deliveries (driver)
-- `GET /api/deliveries` - All deliveries (admin/staff)
-- `PATCH /api/deliveries/:id/status` - Update delivery status
-- `POST /api/deliveries` - Create delivery
-
-### Admin
-- `GET /api/admin/stats` - Dashboard statistics
-- `GET /api/admin/branches` - Branch management
-- `GET /api/admin/users` - User management
-- `PATCH /api/admin/users/:id/role` - Update user role
-
-## Mobile Money Integration
-
-### Supported Providers
-1. **Airtel Money** - +265-1 (first digit after country code)
-2. **TNM Mpamba** - +265-6, +265-8, +265-9 (first digits)
-
-### Payment Processing
-Phone numbers are automatically validated and normalized:
-- Accepts: `+265123456789`, `0123456789`, `123456789`
-- Returns: `+265123456789` format
-
-```typescript
-// API request
-POST /api/payments/process
-{
-  "orderId": "order-123",
-  "method": "airtel_money",  // or "tnm_mpamba"
-  "phoneNumber": "0961234567"
-}
-
-// Response
-{
-  "success": true,
-  "transactionId": "AT_1234567890_abc123",
-  "message": "Payment initiated",
-  "status": "pending"
-}
-```
-
-## Environment Variables
-
-```env
-DATABASE_URL=postgresql://...
-SESSION_SECRET=your-secret-key
-OPENAI_API_KEY=sk-...
-PAYMENT_API_KEY=your-payment-gateway-key
-VITE_STRIPE_PUBLIC_KEY=pk_...
-```
-
-## Deployment
-
-### Web
 ```bash
+npm run check
+npm test
+npm run migration:check
+npm run route-security:check
 npm run build
-npm run start
-# App runs on http://localhost:3000
 ```
 
-### Desktop Distribution
-- Windows: NSIS installer
-- Mac: DMG file
-- Linux: AppImage + deb packages
+## Environment configuration
 
-See `electron-builder.yml` for configuration.
+Start from `env.example`. Production requires, at minimum:
 
-## Performance & Optimization
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `PATIENT_DATA_ENCRYPTION_KEY`
+- `ALLOWED_ORIGINS`
+- `VITE_API_BASE_URL`
+- `USE_DATABASE_STORAGE=true`
 
-- Service Worker for offline support
-- Image optimization
-- Code splitting
-- Lazy loading for pages
-- Database query optimization
-- Caching strategies (network-first for API, cache-first for assets)
+Store secrets in the hosting provider or protected GitHub Environment. `JWT_SECRET` and `PATIENT_DATA_ENCRYPTION_KEY` must be independent high-entropy values. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
-## Security
+## Health and readiness
 
-- HTTPS/TLS encryption
-- Replit Auth (OIDC)
-- Role-based access control
-- Audit logging for compliance
-- Phone number validation
-- Secure session management
+- `GET /health` confirms the process and router are alive.
+- `GET /ready` checks required configuration and database reachability, returning `503` when the service should not receive traffic.
 
-## Compliance
+Monitoring should probe both endpoints and alert on readiness failures, elevated error rates and latency.
 
-- PMRA/MRA pharmaceutical regulations
-- Complete audit trails
-- Prescription validation
-- Drug interaction checks (AI-powered)
-- Data privacy
+## GitHub delivery workflow
 
-## Support
+```mermaid
+flowchart TD
+    A["Issue or project item"] --> B["Agent branch"]
+    B --> C["Draft pull request"]
+    C --> D["Quality and security gates"]
+    D --> E["Review and approval"]
+    E --> F["Merge to main"]
+    F --> G["Version tag"]
+    G --> H["Verified GitHub release"]
+    H --> I["Controlled migration"]
+    I --> J["Staged rollout and monitoring"]
+```
 
-For issues or feature requests, contact development team or submit via app.
+- Work starts from a prioritized issue and an `agent/<scope>` branch.
+- Pull requests remain draft until required checks pass and rollback evidence is present.
+- Releases use semantic tags such as `v1.2.0`; the tag must match `package.json`.
+- Database migrations run through the manual migration workflow and a protected `staging` or `production` environment.
+- Production rollout requires an approved change window, backup/restore evidence and post-deployment monitoring.
 
-## License
+See [Project Governance](docs/PROJECT_GOVERNANCE.md) for priorities, board states and definition of done.
 
-MIT License - See LICENSE file
+## Project documents
+
+- [Security policy](SECURITY.md)
+- [Contribution guide](CONTRIBUTING.md)
+- [Architecture](ARCHITECTURE.md)
+- [Testing](TESTING.md)
+- [Deployment](DEPLOYMENT.md)
+- [Quality gates](docs/QUALITY_GATES.md)
+- [Release process](docs/RELEASE_PROCESS.md)
+- [Project governance](docs/PROJECT_GOVERNANCE.md)
+- [Changelog](CHANGELOG.md)
+
+## Responsible use
+
+This software supports pharmacy operations; it does not replace professional clinical judgment. Drug-interaction and decision-support outputs must be reviewed by a licensed professional. Never use demo data, AI output or automated status changes as the sole basis for dispensing medication.
+

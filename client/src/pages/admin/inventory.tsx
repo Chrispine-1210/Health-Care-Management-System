@@ -38,7 +38,7 @@ export default function AdminInventory() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
     }
   }, [isAuthenticated, isAdmin, authLoading, toast]);
@@ -130,7 +130,7 @@ export default function AdminInventory() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-chart-3">
-              {stockBatches?.filter(b => b.quantity <= 10).length || 0}
+              {stockBatches?.filter(b => b.quantityOnHand - b.quantityReserved <= 10).length || 0}
             </div>
           </CardContent>
         </Card>
@@ -210,7 +210,8 @@ export default function AdminInventory() {
                 ) : stockBatches && stockBatches.length > 0 ? (
                   stockBatches.slice(0, 20).map((batch) => {
                     const expiryStatus = getExpiryStatus(batch.expiryDate);
-                    const stockStatus = getStockStatus(batch.quantity);
+                    const quantityAvailable = batch.quantityOnHand - batch.quantityReserved;
+                    const stockStatus = getStockStatus(quantityAvailable);
 
                     return (
                       <TableRow key={batch.id} data-testid={`batch-row-${batch.id}`}>
@@ -218,7 +219,7 @@ export default function AdminInventory() {
                         <TableCell className="font-medium">{batch.product.name}</TableCell>
                         <TableCell>{batch.branch.name}</TableCell>
                         <TableCell className="text-right font-medium">
-                          {batch.quantity}
+                          {quantityAvailable}
                         </TableCell>
                         <TableCell>{format(new Date(batch.expiryDate), 'MMM dd, yyyy')}</TableCell>
                         <TableCell>

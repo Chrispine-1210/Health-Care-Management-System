@@ -17,7 +17,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
 
 export function CustomerNav() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, signOut } = useAuth();
   const { getItemCount } = useCart();
   const cartCount = getItemCount();
 
@@ -117,14 +117,12 @@ export function CustomerNav() {
                     <Link href="/consultations">Book Consultation</Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <a href="/api/logout">Logout</a>
-                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
               <Button asChild data-testid="button-login">
-                <a href="/api/login">Login</a>
+                <a href="/login">Login</a>
               </Button>
             )}
           </div>
