@@ -100,7 +100,13 @@ export async function verifyPassword(password: string, hashed: string): Promise<
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export const securityHeaders: RequestHandler = (_req, res, next) => {
+export const securityHeaders: RequestHandler = (req, res, next) => {
+  if (req.path === '/api' || req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('CDN-Cache-Control', 'no-store');
+    res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
+    res.vary('Authorization');
+  }
   const scriptSource = process.env.NODE_ENV === 'development' ? "'self' 'unsafe-inline'" : "'self'";
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');

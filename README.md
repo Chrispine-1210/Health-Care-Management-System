@@ -121,6 +121,10 @@ Store secrets in the hosting provider or protected GitHub Environment. `JWT_SECR
 - `GET /health` confirms the process and router are alive.
 - `GET /ready` checks required configuration and database reachability, returning `503` when the service should not receive traffic.
 
+The PWA caches the app shell and static assets only. API and authenticated responses use the network without an offline replay. Logout clears cached query data.
+
+Production SMTP requires `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM`. A delivery acknowledgement requires provider acceptance; a local preview is not production delivery. Checkout currently offers cash on delivery. Online payment and SMS providers require separate implementation/certification.
+
 Monitoring should probe both endpoints and alert on readiness failures, elevated error rates and latency.
 
 ## GitHub delivery workflow
@@ -157,6 +161,7 @@ See [Project Governance](docs/PROJECT_GOVERNANCE.md) for priorities, board state
 - [Release process](docs/RELEASE_PROCESS.md)
 - [Project governance](docs/PROJECT_GOVERNANCE.md)
 - [Changelog](CHANGELOG.md)
+- [Finalization evidence — 18 November 2026](docs/FINALIZATION_2026-11-18.md)
 
 ## Responsible use
 

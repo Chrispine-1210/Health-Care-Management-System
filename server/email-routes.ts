@@ -22,7 +22,7 @@ const sendEmailSchema = z.object({
 const sendNotificationSchema = z.object({
   userId: z.string(),
   type: z.enum(['welcome', 'order-confirmation', 'prescription-approved', 'delivery-notification', 'custom']),
-  data: z.record(z.any()),
+  data: z.record(z.string(), z.any()),
 });
 
 const generatePrescriptionLetterSchema = z.object({

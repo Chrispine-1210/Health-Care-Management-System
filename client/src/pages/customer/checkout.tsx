@@ -10,9 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft } from "lucide-react";
 import { useLocation } from "wouter";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
+import type { Branch, Prescription } from '@shared/schema';
 
 export default function CheckoutPage() {
   const { user, isAuthenticated } = useAuth();
@@ -25,7 +26,22 @@ export default function CheckoutPage() {
     deliveryAddress: "",
     deliveryCity: "Lilongwe",
     paymentMethod: "cash",
+    branchId: "",
+    prescriptionId: "",
   });
+  const { data: branches = [], isLoading: branchesLoading, isError: branchesError } = useQuery<Branch[]>({
+    queryKey: ['/api/branches'],
+    enabled: isAuthenticated,
+  });
+  const { data: prescriptions = [] } = useQuery<Prescription[]>({
+    queryKey: [`/api/prescriptions/patient/${user?.id}`],
+    enabled: Boolean(user?.id),
+  });
+  const activeBranches = branches.filter((branch) => branch.isActive);
+  const selectedBranchId = formData.branchId || (activeBranches.length === 1 ? activeBranches[0].id : '');
+  const eligiblePrescriptions = prescriptions.filter((prescription) => !prescription.revokedAt
+    && !['revoked', 'cancelled', 'expired', 'rejected'].includes(prescription.status)
+    && (!prescription.expiresAt || new Date(prescription.expiresAt) > new Date()));
 
   const createOrderMutation = useMutation<Response, Error, Record<string, unknown>>({
     mutationFn: async (orderData) => {
@@ -52,13 +68,6 @@ export default function CheckoutPage() {
     },
   });
 
-  const orderSummary = useMemo(() => {
-    const subtotal = getTotalPrice();
-    const deliveryCharge = 500;
-    const tax = subtotal * 0.16;
-    return { subtotal, deliveryCharge, tax, total: subtotal + deliveryCharge + tax };
-  }, [getTotalPrice]);
-
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -71,7 +80,11 @@ export default function CheckoutPage() {
       return;
     }
 
-    if (!formData.deliveryAddress) {
+    if (!selectedBranchId || !activeBranches.some((branch) => branch.id === selectedBranchId)) {
+      toast({ title: 'Select a pharmacy', description: 'Choose an available branch to fulfil your order.', variant: 'destructive' });
+      return;
+    }
+    if (!formData.deliveryAddress.trim()) {
       toast({
         title: "Error",
         description: "Please enter a delivery address",
@@ -80,26 +93,18 @@ export default function CheckoutPage() {
       return;
     }
 
-    const { subtotal, deliveryCharge, tax, total } = orderSummary;
-
     createOrderMutation.mutate({
-      customerId: user?.id,
-      branchId: "default-branch",
+      branchId: selectedBranchId,
+      ...(formData.prescriptionId ? { prescriptionId: formData.prescriptionId } : {}),
       items: items.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
-        unitPrice: item.price,
       })),
-      subtotal,
-      deliveryCharge,
-      total,
       deliveryAddress: formData.deliveryAddress,
       deliveryCity: formData.deliveryCity,
       paymentMethod: formData.paymentMethod,
-      status: "pending",
-      paymentStatus: "pending",
     });
-  }, [items, formData, orderSummary, user, createOrderMutation, toast]);
+  }, [items, formData, selectedBranchId, activeBranches, createOrderMutation, toast]);
 
   const subtotal = getTotalPrice();
   const deliveryCharge = 500;
@@ -133,6 +138,31 @@ export default function CheckoutPage() {
         <h1 className="text-3xl font-bold mb-8">Checkout</h1>
 
         <div className="grid gap-6">
+          <Card>
+            <CardHeader><CardTitle>Pharmacy and Prescription</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="checkout-branch">Fulfilment Branch</Label>
+                <Select value={selectedBranchId} onValueChange={(branchId) => setFormData({ ...formData, branchId })} disabled={branchesLoading}>
+                  <SelectTrigger id="checkout-branch" data-testid="select-checkout-branch"><SelectValue placeholder={branchesLoading ? 'Loading branches...' : 'Select a pharmacy'} /></SelectTrigger>
+                  <SelectContent>{activeBranches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name} — {branch.city}</SelectItem>)}</SelectContent>
+                </Select>
+                {branchesError && <p role="alert" className="text-sm text-destructive">Pharmacy availability could not be loaded. Please try again.</p>}
+                {!branchesLoading && !branchesError && !activeBranches.length && <p role="alert" className="text-sm text-destructive">No pharmacy is currently accepting online orders.</p>}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="checkout-prescription">Prescription, when required</Label>
+                <Select value={formData.prescriptionId || 'none'} onValueChange={(value) => setFormData({ ...formData, prescriptionId: value === 'none' ? '' : value })}>
+                  <SelectTrigger id="checkout-prescription" data-testid="select-checkout-prescription"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No prescription selected</SelectItem>
+                    {eligiblePrescriptions.map((prescription) => <SelectItem key={prescription.id} value={prescription.id}>Prescription {prescription.id.slice(0, 8)} · {prescription.status}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">Prescription medicines require a valid prescription covering the selected products and quantities. <a href="/prescriptions" className="underline">Manage prescriptions</a></p>
+              </div>
+            </CardContent>
+          </Card>
           {/* Order Summary */}
           <Card data-testid="card-order-summary">
             <CardHeader>
@@ -215,17 +245,10 @@ export default function CheckoutPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="cash">Cash on Delivery</SelectItem>
-                  <SelectItem value="airtel_money">Airtel Money</SelectItem>
-                  <SelectItem value="tnm_mpamba">TNM Mpamba</SelectItem>
-                  <SelectItem value="card">Credit/Debit Card</SelectItem>
                 </SelectContent>
               </Select>
               
-              {formData.paymentMethod !== "cash" && (
-                <div className="p-3 bg-muted rounded-lg text-sm">
-                  <p className="text-muted-foreground">Payment instruction will be sent to your phone after order confirmation.</p>
-                </div>
-              )}
+              <p className="text-sm text-muted-foreground">Online payments are currently unavailable. Pay on delivery.</p>
             </CardContent>
           </Card>
 
@@ -243,7 +266,7 @@ export default function CheckoutPage() {
             <Button
               className="flex-1"
               onClick={handleSubmit}
-              disabled={createOrderMutation.isPending || items.length === 0}
+              disabled={createOrderMutation.isPending || items.length === 0 || !selectedBranchId || branchesLoading || branchesError || !activeBranches.length}
               data-testid="button-place-order"
             >
               {createOrderMutation.isPending ? "Placing Order..." : "Place Order"}

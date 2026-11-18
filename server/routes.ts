@@ -65,7 +65,7 @@ const orderCreateSchema = z.object({
     batchId: z.string().optional(),
     quantity: z.number().int().positive().max(1000),
   }).strict()).min(1).max(100),
-  branchId: z.string(),
+  branchId: z.string().min(1),
   prescriptionId: z.string().optional(),
   deliveryAddress: z.string().max(500).optional(),
   deliveryCity: z.string().max(100).optional(),
@@ -661,7 +661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (normalizeHealthcareRole(req.user.role) === 'patient') {
         orders = await getStorage().getOrdersByCustomer(userId);
       } else if (canUpdateOrder(req.user)) {
-        orders = await getStorage().getAllOrdersForOperations();
+        orders = req.user.branchId ? await getStorage().getOrdersByBranch(req.user.branchId) : [];
       } else {
         return res.status(403).json({ message: "Cannot list orders" });
       }
@@ -697,6 +697,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const { items, branchId, prescriptionId, deliveryAddress, deliveryCity, deliveryLatitude, deliveryLongitude, paymentMethod } = orderCreateSchema.parse(req.body);
+      const branch = await getStorage().getBranch(branchId);
+      if (!branch) return res.status(400).json({ message: 'Select a valid pharmacy branch' });
+      if (!branch.isActive) return res.status(409).json({ message: 'This pharmacy branch is not accepting orders' });
       
       // Calculate totals
       let subtotal = 0;
@@ -705,6 +708,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const item of items) {
         const product = await getStorage().getProduct(item.productId);
         if (!product) return res.status(400).json({ message: "Unknown product" });
+        if (!product.isActive) return res.status(409).json({ message: 'Product is unavailable', productId: product.id });
         if (!product.onlineSaleAllowed || product.prescriptionRequirement === 'restricted_online') return res.status(409).json({ message: 'Product is restricted from online ordering', productId: product.id });
         const requiresPrescription = product.prescriptionRequired || product.prescriptionRequirement !== 'none' || product.requiresPharmacistApproval;
         let prescriptionLink: { prescriptionId: string; prescribedQuantity: number } | undefined;
@@ -767,6 +771,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.status(201).json({ ...order, items: createdItems });
     } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: 'Invalid order details', issues: error.issues });
       if (error instanceof InsufficientStockError) {
         return res.status(409).json({ message: "Insufficient eligible stock", productId: error.productId });
       }
@@ -1513,7 +1518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       firstName: z.string().optional(),
     }),
     template: z.string().min(1),
-    variables: z.record(z.unknown()).default({}),
+    variables: z.record(z.string(), z.unknown()).default({}),
     maxAttempts: z.number().int().min(1).max(5).optional(),
   });
 

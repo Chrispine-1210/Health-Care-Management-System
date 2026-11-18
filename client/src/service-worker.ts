@@ -3,7 +3,7 @@
 const sw = globalThis as unknown as ServiceWorkerGlobalScope;
 
 const CACHE_PREFIX = 'thandizo-';
-const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const CACHE_NAME = `${CACHE_PREFIX}v3`;
 const APP_SHELL_URL = '/index.html';
 const PRECACHE_URLS = [APP_SHELL_URL, '/manifest.json'];
 const STATIC_DESTINATIONS = new Set(['script', 'style', 'image', 'font', 'manifest']);
@@ -33,19 +33,6 @@ function shouldCacheResponse(response: Response): boolean {
   return response.ok && !contentType.includes('text/html');
 }
 
-async function networkFirst(request: Request): Promise<Response> {
-  try {
-    const response = await fetch(request);
-    if (shouldCacheResponse(response)) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    return (await caches.match(request)) || new Response('Offline - cached data unavailable', { status: 503 });
-  }
-}
-
 async function cacheFirst(request: Request): Promise<Response> {
   const cached = await caches.match(request);
   if (cached) return cached;
@@ -72,13 +59,15 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
   const url = new URL(event.request.url);
   if (url.origin !== sw.location.origin || url.pathname === '/service-worker.js') return;
 
-  if (event.request.mode === 'navigate') {
-    event.respondWith(networkOnlyNavigation(event.request));
+  // Clinical, account, payment and other API responses must never enter a
+  // shared browser cache or be replayed after logout / when offline.
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/') || event.request.headers.has('Authorization')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 
-  if (url.pathname.startsWith('/api')) {
-    event.respondWith(networkFirst(event.request));
+  if (event.request.mode === 'navigate') {
+    event.respondWith(networkOnlyNavigation(event.request));
     return;
   }
 

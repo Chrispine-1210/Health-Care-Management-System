@@ -2,6 +2,9 @@ import express from "express";
 import { registerRoutes } from "./routes";
 import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { globalErrorHandler, notFoundHandler } from "./errorHandler";
+import { validateProductionEnvironment } from './config';
+
+validateProductionEnvironment();
 
 const app = express();
 app.disable("x-powered-by");

@@ -86,6 +86,10 @@ const templateRegistry: Record<string, TemplateRenderer> = {
 class SmsProvider {
   async send(to: string, message: string): Promise<boolean> {
     if (!to) return false;
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('SMS delivery unavailable: production provider is not implemented');
+      return false;
+    }
     logger.info('SMS queued to provider abstraction', { to, messageLength: message.length });
     return true;
   }

@@ -1,5 +1,6 @@
 import { logger } from './logger';
 import { z } from 'zod';
+import { createTransport } from 'nodemailer';
 
 /**
  * Email Service - Handles all email communication
@@ -25,18 +26,29 @@ export interface EmailPayload {
   }>;
 }
 
-class EmailService {
-  private smtpConfig: {
-    host: string;
-    port: number;
-    secure: boolean;
-    auth: { user: string; pass: string };
-  } | null = null;
+interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  auth: { user: string; pass: string };
+  connectionTimeout: number;
+  socketTimeout: number;
+  disableFileAccess: boolean;
+  disableUrlAccess: boolean;
+}
 
-  constructor() {
+interface EmailTransport {
+  sendMail(payload: EmailPayload & { from: string }): Promise<{ accepted?: unknown[]; rejected?: unknown[] }>;
+}
+
+export class EmailService {
+  private transport: EmailTransport | null = null;
+  private sender: string | undefined;
+
+  constructor(transportFactory: (config: SmtpConfig) => EmailTransport = (config) => createTransport(config)) {
     // Initialize with environment config
     if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
-      this.smtpConfig = {
+      this.transport = transportFactory({
         host: process.env.SMTP_HOST,
         port: parseInt(process.env.SMTP_PORT || '587'),
         secure: process.env.SMTP_SECURE === 'true',
@@ -44,7 +56,12 @@ class EmailService {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASSWORD,
         },
-      };
+        connectionTimeout: 10_000,
+        socketTimeout: 15_000,
+        disableFileAccess: true,
+        disableUrlAccess: true,
+      });
+      this.sender = process.env.SMTP_FROM;
       logger.info('Email service configured with SMTP');
     } else {
       logger.warn('Email service: SMTP not configured. Using development mode.');
@@ -251,30 +268,30 @@ class EmailService {
   }
 
   /**
-   * Send email (mock implementation - would use nodemailer in production)
+   * Deliver through configured SMTP in production; preview only in development.
    */
   async send(payload: EmailPayload): Promise<boolean> {
     try {
       // Validate email
       const emailSchema = z.string().email();
       emailSchema.parse(payload.to);
+      for (const recipient of [...payload.cc || [], ...payload.bcc || []]) emailSchema.parse(recipient);
 
-      if (process.env.NODE_ENV === 'production' && this.smtpConfig) {
-        // In production: use actual SMTP (nodemailer)
-        logger.info(`Email would be sent via SMTP: ${payload.to}`, { subject: payload.subject });
-        // const transporter = nodemailer.createTransport(this.smtpConfig);
-        // await transporter.sendMail({ from: 'noreply@thandizo.com', ...payload });
+      if (process.env.NODE_ENV === 'production') {
+        if (!this.transport || !this.sender || !emailSchema.safeParse(this.sender).success) {
+          logger.error('Email delivery unavailable: SMTP and SMTP_FROM must be configured');
+          return false;
+        }
+        const result = await this.transport.sendMail({ ...payload, from: this.sender });
+        return Boolean(result.accepted?.length) && !result.rejected?.length;
       } else {
         // In development: log to console
-        logger.info(`Email (DEV): ${payload.to}`, {
-          subject: payload.subject,
-          preview: payload.html.slice(0, 100),
-        });
+        logger.info('Development email preview generated; no message delivered');
       }
 
       return true;
     } catch (error) {
-      logger.error('Email send failed', { error, to: payload.to });
+      logger.error('Email send failed', { error });
       return false;
     }
   }

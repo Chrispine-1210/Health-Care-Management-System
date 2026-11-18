@@ -271,6 +271,45 @@ test('registered routes enforce authentication, permissions, ownership, and non-
   assert.equal(forbiddenPermission.status, 403);
   assert.equal((await forbiddenPermission.json() as { message: string }).message, 'Forbidden');
 
+  const branchOrders = await request('/api/orders', branchAdministrator.token);
+  assert.equal(branchOrders.status, 200);
+  assert.ok((await branchOrders.json() as Array<{ branchId: string }>).every((order) => order.branchId === 'branch-a'));
+  const unassignedOrders = await request('/api/orders', administrator.token);
+  assert.equal(unassignedOrders.status, 403);
+  await storage.updateUser(branchAdministrator.userId, { branchId: null });
+  const branchlessOrders = await request('/api/orders', branchAdministrator.token);
+  assert.equal(branchlessOrders.status, 200);
+  assert.deepEqual(await branchlessOrders.json(), []);
+  await storage.updateUser(branchAdministrator.userId, { branchId: 'branch-a' });
+
+  const checkoutBranch = await storage.createBranch({ name: 'Synthetic checkout pharmacy', address: 'Synthetic address', city: 'Lilongwe', isActive: true });
+  const checkoutProduct = await storage.createProduct({ sku: 'SYNTHETIC-CHECKOUT', name: 'Synthetic product', price: '125.50' });
+  await storage.createStockBatch({ productId: checkoutProduct.id, branchId: checkoutBranch.id, batchNumber: 'CHECKOUT', quantityOnHand: 10, expiryDate: new Date('2030-01-01'), costPrice: '50' });
+  const checkoutPayload = { branchId: checkoutBranch.id, items: [{ productId: checkoutProduct.id, quantity: 2 }], deliveryAddress: 'Synthetic delivery address', deliveryCity: 'Lilongwe', paymentMethod: 'cash' };
+  const invalidCheckout = await request('/api/orders', patientA.token, {
+    method: 'POST', body: JSON.stringify({ ...checkoutPayload, total: 1, customerId: patientB.userId }),
+  });
+  assert.equal(invalidCheckout.status, 400);
+  const unknownBranch = await request('/api/orders', patientA.token, {
+    method: 'POST', body: JSON.stringify({ ...checkoutPayload, branchId: 'unknown-branch' }),
+  });
+  assert.equal(unknownBranch.status, 400);
+  const checkout = await request('/api/orders', patientA.token, { method: 'POST', body: JSON.stringify(checkoutPayload) });
+  assert.equal(checkout.status, 201);
+  const checkoutOrder = await checkout.json() as { customerId: string; subtotal: string; total: string; paymentStatus: string; items: Array<{ unitPrice: string }> };
+  assert.equal(checkoutOrder.customerId, patientA.userId);
+  assert.equal(Number(checkoutOrder.subtotal), 251);
+  assert.equal(Number(checkoutOrder.total), 751);
+  assert.equal(checkoutOrder.paymentStatus, 'pending');
+  assert.equal(Number(checkoutOrder.items[0].unitPrice), 125.5);
+  await storage.updateBranch(checkoutBranch.id, { isActive: false });
+  const closedBranch = await request('/api/orders', patientA.token, { method: 'POST', body: JSON.stringify(checkoutPayload) });
+  assert.equal(closedBranch.status, 409);
+  await storage.updateBranch(checkoutBranch.id, { isActive: true });
+  await storage.updateProduct(checkoutProduct.id, { isActive: false });
+  const inactiveProduct = await request('/api/orders', patientA.token, { method: 'POST', body: JSON.stringify(checkoutPayload) });
+  assert.equal(inactiveProduct.status, 409);
+
   await storage.updateUser(patientB.userId, { accountStatus: 'disabled' });
   const disabledUser = await request('/api/orders', patientB.token);
   assert.equal(disabledUser.status, 401);

@@ -28,7 +28,7 @@ export function useAuth() {
     const currentToken = localStorage.getItem("auth_token");
     try {
       if (currentToken) {
-        await fetch("/api/logout", { method: "POST", headers: { Authorization: `Bearer ${currentToken}` } });
+        await fetch(resolveApiUrl("/api/logout"), { method: "POST", headers: { Authorization: `Bearer ${currentToken}` } });
       }
     } catch (e) {
       console.error("Logout error:", e);

@@ -2,8 +2,9 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
+import { resolveDatabaseUrl } from '../server/database-config.mjs';
 
-const connectionString = process.env.VERCEL ? process.env.POSTGRES_URL || process.env.DATABASE_URL : process.env.DATABASE_URL;
+const connectionString = resolveDatabaseUrl();
 if (!connectionString) throw new Error('DATABASE_URL is required');
 neonConfig.webSocketConstructor = ws;
 const pool = new Pool({ connectionString, max: 1 });

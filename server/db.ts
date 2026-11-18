@@ -2,10 +2,11 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
 import * as schema from "@shared/schema";
+import { resolveDatabaseUrl } from './database-config.mjs';
 
 neonConfig.webSocketConstructor = ws;
 
-const connectionString = process.env.VERCEL ? process.env.POSTGRES_URL || process.env.DATABASE_URL : process.env.DATABASE_URL;
+const connectionString = resolveDatabaseUrl();
 
 if (!connectionString) {
   throw new Error(
