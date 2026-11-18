@@ -1,96 +1,23 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { 
-  Card, 
-  CardContent, 
-  CardHeader, 
-  CardTitle,
-  CardDescription 
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { FileText, Plus, Edit, Trash2 } from "lucide-react";
-import type { ContentItem } from "@shared/schema";
-import { format } from "date-fns";
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { apiRequest, queryClient } from '@/lib/queryClient';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import type { ContentItem } from '@shared/schema';
 
+type Editor = { id?: string; title: string; slug: string; content: string; excerpt: string; category: string; status: 'draft' | 'published' | 'archived' };
+const empty: Editor = { title: '', slug: '', content: '', excerpt: '', category: '', status: 'draft' };
 export default function AdminContent() {
-  const { data: content, isLoading } = useQuery<ContentItem[]>({
-    queryKey: ["/api/content"],
-  });
-
-  if (isLoading) return <div>Loading content...</div>;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Content Management</h1>
-          <p className="text-muted-foreground">Manage health articles, news, and pharmacy updates.</p>
-        </div>
-        <Button className="hover-elevate active-elevate-2">
-          <Plus className="mr-2 h-4 w-4" /> New Article
-        </Button>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Articles & Pages</CardTitle>
-          <CardDescription>A list of all educational and promotional content.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Published</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {content?.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell className="font-medium">{item.title}</TableCell>
-                  <TableCell>{item.category}</TableCell>
-                  <TableCell>
-                    <Badge variant={item.status === 'published' ? 'default' : 'secondary'}>
-                      {item.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {item.publishedAt ? format(new Date(item.publishedAt), "MMM d, yyyy") : "Draft"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button size="icon" variant="ghost">
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" className="text-destructive">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(!content || content.length === 0) && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
-                    No content items found. Start by creating a new article.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  );
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const query = useQuery<ContentItem[]>({ queryKey: ['/api/admin/content'] });
+  const save = useMutation({ mutationFn: async (data: Editor) => {
+    const { id, ...fields } = data;
+    await apiRequest(id ? 'PATCH' : 'POST', id ? `/api/admin/content/${encodeURIComponent(id)}` : '/api/admin/content', fields);
+  }, onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['/api/admin/content'] }), queryClient.invalidateQueries({ queryKey: ['/api/content'] })]); setEditor(null); } });
+  const edit = (item: ContentItem) => { save.reset(); setEditor({ id: item.id, title: item.title, slug: item.slug, content: item.content, excerpt: item.excerpt ?? '', category: item.category ?? '', status: item.status }); };
+  return <div className="space-y-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-3xl font-semibold">Published information</h1><p className="mt-2 text-muted-foreground">Prepare service updates as drafts. Only published, dated articles appear on the public website.</p></div><Button onClick={() => { save.reset(); setEditor({ ...empty }); }}>New article</Button></div>{editor && <Card><CardHeader><CardTitle>{editor.id ? 'Edit article' : 'New article'}</CardTitle></CardHeader><CardContent><form className="space-y-4" onSubmit={(event) => { event.preventDefault(); save.mutate(editor); }}><div className="space-y-2"><Label htmlFor="article-title">Title</Label><Input id="article-title" value={editor.title} required maxLength={255} onChange={(e) => setEditor({ ...editor, title:e.target.value })} /></div><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="article-slug">URL slug</Label><Input id="article-slug" value={editor.slug} required maxLength={180} pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="service-update" onChange={(e) => setEditor({ ...editor, slug:e.target.value })} /></div><div className="space-y-2"><Label htmlFor="article-category">Category</Label><Input id="article-category" maxLength={100} value={editor.category} onChange={(e) => setEditor({ ...editor, category:e.target.value })} /></div></div><div className="space-y-2"><Label htmlFor="article-excerpt">Short introduction</Label><Textarea id="article-excerpt" value={editor.excerpt} maxLength={1000} onChange={(e) => setEditor({ ...editor, excerpt:e.target.value })} /></div><div className="space-y-2"><Label htmlFor="article-body">Article text</Label><Textarea id="article-body" className="min-h-56" required maxLength={30000} value={editor.content} onChange={(e) => setEditor({ ...editor, content:e.target.value })} /></div><div className="space-y-2"><Label htmlFor="article-status">Publication status</Label><select id="article-status" value={editor.status} className="h-10 rounded-md border bg-background px-3 text-sm" onChange={(e) => setEditor({ ...editor, status:e.target.value as Editor['status'] })}><option value="draft">Draft — private</option><option value="published">Published — visible on public website</option><option value="archived">Archived — private</option></select></div><p className="text-xs text-muted-foreground">Do not include patient information, private contact details or unsupported clinical claims. Plain text is displayed safely; HTML is not executed.</p>{save.isError && <p role="alert" className="text-sm text-destructive">The article could not be saved. Check your permissions, fields and unique URL slug.</p>}<div className="flex gap-3"><Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : editor.status === 'published' ? 'Save & publish' : 'Save article'}</Button><Button type="button" variant="outline" disabled={save.isPending} onClick={() => setEditor(null)}>Cancel</Button></div></form></CardContent></Card>}{query.isLoading ? <p role="status">Loading articles…</p> : query.isError ? <p role="alert">Articles could not load. Reload to try again.</p> : !query.data?.length ? <Card><CardContent className="p-6">No articles yet. Create a draft to get started.</CardContent></Card> : <div className="space-y-3">{query.data.map((item) => <Card key={item.id}><CardContent className="p-5 flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-medium">{item.title}</h2><p className="text-sm text-muted-foreground">/updates/{item.slug}</p><Badge className="mt-2" variant="secondary">{item.status}</Badge></div><Button variant="outline" onClick={() => edit(item)}>Edit article</Button></CardContent></Card>)}</div>}</div>;
 }

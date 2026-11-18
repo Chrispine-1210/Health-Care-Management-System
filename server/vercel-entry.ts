@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { corsHeaders, correlationId, securityHeaders, sanitizeRequest, rateLimit } from "./security";
 import { globalErrorHandler, notFoundHandler } from "./errorHandler";
 import { validateProductionEnvironment } from './config';
+import { observeApiReliability } from './reliability';
 
 validateProductionEnvironment();
 
@@ -21,7 +22,8 @@ app.use((req, _res, next) => {
 app.use(corsHeaders);
 app.use(securityHeaders);
 app.use(correlationId);
-app.use(rateLimit());
+app.use(observeApiReliability);
+app.use('/api', rateLimit());
 app.use('/api/auth/login', rateLimit(15 * 60 * 1000, 10));
 app.use('/api/auth/register', rateLimit(60 * 60 * 1000, 5));
 app.use(express.json({

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const sources = ['server/auth-routes.ts', 'server/email-routes.ts', 'server/routes.ts'];
+const sources = ['server/auth-routes.ts', 'server/email-routes.ts', 'server/routes.ts', 'server/intelligenceApi.ts'];
 const outputPath = 'docs/route-security-register.md';
 
 function contextFor(route) {

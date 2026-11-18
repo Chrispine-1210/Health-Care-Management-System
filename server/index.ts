@@ -8,6 +8,7 @@ import { inventoryIntelligenceService } from "./inventoryIntelligence";
 import { pool } from "./db";
 import { validateProductionEnvironment } from "./config";
 import { globalErrorHandler, notFoundHandler } from "./errorHandler";
+import { observeApiReliability } from './reliability';
 
 validateProductionEnvironment();
 
@@ -16,7 +17,8 @@ app.disable("x-powered-by");
 app.use(corsHeaders);
 app.use(securityHeaders);
 app.use(correlationId);
-app.use(rateLimit());
+app.use(observeApiReliability);
+app.use('/api', rateLimit());
 app.use('/api/auth/login', rateLimit(15 * 60 * 1000, 10));
 app.use('/api/auth/register', rateLimit(60 * 60 * 1000, 5));
 
@@ -63,7 +65,7 @@ app.use((req, res, next) => {
 // ──────────────────────────────
 (async () => {
   // Seed test data
-  if (process.env.NODE_ENV === 'development') await seedTestData();
+  if (process.env.NODE_ENV === 'development' && process.env.SEED_TEST_DATA === 'true') await seedTestData();
 
   // Start inventory automation and register routes
   inventoryIntelligenceService.startDailyScheduler();

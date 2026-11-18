@@ -32,21 +32,23 @@ export class InventoryIntelligenceService {
         logger.error('Scheduled inventory scan failed', { error });
       }
     };
-    setInterval(scan, 24 * 60 * 60 * 1000);
+    setInterval(scan, 24 * 60 * 60 * 1000).unref();
   }
 
-  async scanInventory(): Promise<InventoryAlert[]> {
-    const batches = await getStorage().getStockBatches();
+  async scanInventory(branchId?: string): Promise<InventoryAlert[]> {
+    const storage = getStorage();
+    const [batches, products] = await Promise.all([branchId ? storage.getStockBatchesByBranch(branchId) : storage.getStockBatches(), storage.getProducts()]);
+    const names = new Map(products.map((product) => [product.id, product.name]));
     const now = Date.now();
     const alerts: InventoryAlert[] = [];
 
     for (const batch of batches) {
-      const product = await getStorage().getProduct(batch.productId);
-      const productName = product?.name || batch.productId;
+      if (batch.status !== 'active' || batch.quantityOnHand <= 0) continue;
+      const productName = names.get(batch.productId) || batch.productId;
       const expiryMs = new Date(batch.expiryDate).getTime() - now;
       const daysToExpiry = Math.ceil(expiryMs / (1000 * 60 * 60 * 24));
 
-      const quantityAvailable = batch.quantityOnHand - batch.quantityReserved;
+      const quantityAvailable = expiryMs > 0 ? Math.max(0, batch.quantityOnHand - batch.quantityReserved) : 0;
       if (quantityAvailable <= DEFAULT_LOW_STOCK_THRESHOLD) {
         alerts.push({
           id: `low-${batch.id}`,
@@ -61,7 +63,7 @@ export class InventoryIntelligenceService {
         });
       }
 
-      if ([30, 15, 7].some((windowDays) => daysToExpiry <= windowDays && daysToExpiry > windowDays - 7)) {
+      if (daysToExpiry <= 30) {
         alerts.push({
           id: `expiry-${daysToExpiry}-${batch.id}`,
           type: 'expiry',
@@ -69,8 +71,8 @@ export class InventoryIntelligenceService {
           productId: batch.productId,
           branchId: batch.branchId,
           batchId: batch.id,
-          message: `${productName} batch ${batch.batchNumber} expires in ${daysToExpiry} day(s).`,
-          suggestedAction: daysToExpiry <= 7 ? 'Quarantine or prioritize pharmacist review immediately.' : 'Prioritize FEFO dispensing and supplier replacement review.',
+          message: expiryMs <= 0 ? `${productName} batch ${batch.batchNumber} is expired.` : `${productName} batch ${batch.batchNumber} expires in ${daysToExpiry} day(s).`,
+          suggestedAction: expiryMs <= 0 ? 'Do not dispense. Quarantine through the approved pharmacist workflow.' : daysToExpiry <= 7 ? 'Prioritize pharmacist review immediately.' : 'Review FEFO eligibility and supplier replacement options.',
           createdAt: new Date().toISOString(),
         });
       }
@@ -90,7 +92,7 @@ export class InventoryIntelligenceService {
       }
     }
 
-    this.dashboardAlerts = alerts;
+    this.dashboardAlerts = branchId ? [...this.dashboardAlerts.filter((alert) => alert.branchId !== branchId), ...alerts] : alerts;
     logger.info('Inventory intelligence scan completed', { alerts: alerts.length });
     return alerts;
   }
@@ -100,11 +102,13 @@ export class InventoryIntelligenceService {
   }
 
   async notifyCriticalAlerts(alerts: InventoryAlert[]): Promise<void> {
+    const email = process.env.INVENTORY_ALERT_EMAIL;
+    if (!email) return;
     for (const alert of alerts.filter((candidate) => candidate.severity === 'critical')) {
       await notificationService.enqueue({
         eventType: 'inventory.critical',
-        channels: ['email', 'sms'],
-        recipient: { email: process.env.INVENTORY_ALERT_EMAIL || 'admin@thandizo.com', phone: process.env.INVENTORY_ALERT_PHONE },
+        channels: ['email'],
+        recipient: { email },
         template: 'inventory-critical-alert',
         variables: { message: alert.message, suggestedAction: alert.suggestedAction },
       });

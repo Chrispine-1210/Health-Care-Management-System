@@ -16,8 +16,10 @@ if (!connectionString) {
 
 export const pool = new Pool({
   connectionString,
-  max: Number(process.env.DB_POOL_MAX || 10),
+  max: Math.max(1, Math.min(20, Number(process.env.DB_POOL_MAX) || (process.env.VERCEL ? 3 : 10))),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
+  query_timeout: 10_000,
+  statement_timeout: 10_000,
 });
 export const db = drizzle({ client: pool, schema });

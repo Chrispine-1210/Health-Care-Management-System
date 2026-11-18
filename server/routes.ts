@@ -19,6 +19,8 @@ import { insertBranchSchema, insertContentItemSchema, insertDeliverySchema, inse
 import { healthCheck, readinessCheck } from "./healthCheck";
 import { authService } from "./authSystem";
 import { breakGlassService } from "./breakGlassService";
+import { isPublicProduct, publicProduct, publicBranch, isPublishedArticle, publicArticle } from '@shared/publicSite';
+import { registerIntelligenceApi } from './intelligenceApi';
 import {
   canCreateAppointmentFor,
   canInitiatePayment,
@@ -204,7 +206,10 @@ const deliveryStatusSchema = z.object({
 }).strict();
 const branchCreateSchema = insertBranchSchema.strict();
 const branchUpdateSchema = branchCreateSchema.partial().strict();
-const contentCreateSchema = insertContentItemSchema.omit({ authorId: true, viewCount: true, publishedAt: true }).strict();
+const contentCreateSchema = insertContentItemSchema.omit({ authorId: true, viewCount: true, publishedAt: true }).extend({
+  title: z.string().trim().min(1).max(255), slug: z.string().max(180).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  content: z.string().min(1).max(30_000), excerpt: z.string().max(1000).nullable().optional(), category: z.string().max(100).nullable().optional(),
+}).strict();
 const contentUpdateSchema = contentCreateSchema.partial().strict();
 const staffAppointmentCreateSchema = customerAppointmentCreateSchema.extend({
   patientId: z.string(),
@@ -333,7 +338,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/admin/stats', authenticateToken, requirePermission(PERMISSIONS.REPORT_VIEW), async (req, res) => {
     try {
-      const stats = await getStorage().getDashboardStats();
+      const global = ['system_administrator', 'super_administrator'].includes(normalizeHealthcareRole(req.user!.role) ?? '');
+      if (!global && !req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+      const stats = await getStorage().getDashboardStats(global ? undefined : req.user!.branchId!);
       res.json(stats);
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
@@ -343,7 +350,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/admin/inventory', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), async (req, res) => {
     try {
-      const batches = await getStorage().getStockBatches();
+      const global = ['system_administrator', 'super_administrator'].includes(normalizeHealthcareRole(req.user!.role) ?? '');
+      if (!global && !req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+      const batches = global ? await getStorage().getStockBatches() : await getStorage().getStockBatchesByBranch(req.user!.branchId!);
       // Fetch related product and branch data
       const batchesWithDetails = await Promise.all(
         batches.map(async (batch) => {
@@ -1205,10 +1214,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // BRANCH ROUTES
   // ============================================================================
 
+  app.get('/api/public/catalogue', async (_req, res, next) => {
+    try { res.json((await getStorage().getProducts()).filter(isPublicProduct).map(publicProduct)); }
+    catch (error) { next(error); }
+  });
+
+  app.get('/api/public/branches', async (_req, res, next) => {
+    try { res.json((await getStorage().getBranches()).filter((branch) => branch.isActive).map(publicBranch)); }
+    catch (error) { next(error); }
+  });
+
   app.get('/api/branches', async (req, res) => {
     try {
       const branches = await getStorage().getBranches();
-      res.json(branches);
+      res.json(branches.filter((branch) => branch.isActive).map(publicBranch));
     } catch (error) {
       console.error("Error fetching branches:", error);
       res.status(500).json({ message: "Failed to fetch branches" });
@@ -1218,10 +1237,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/branches/:id', async (req, res) => {
     try {
       const branch = await getStorage().getBranch(req.params.id);
-      if (!branch) {
+      if (!branch || !branch.isActive) {
         return res.status(404).json({ message: "Branch not found" });
       }
-      res.json(branch);
+      res.json(publicBranch(branch));
     } catch (error) {
       console.error("Error fetching branch:", error);
       res.status(500).json({ message: "Failed to fetch branch" });
@@ -1264,9 +1283,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/content', async (req, res) => {
     try {
-      const { status } = req.query;
-      const content = await getStorage().getContentItems(status as string);
-      res.json(content);
+      const content = await getStorage().getContentItems('published');
+      res.json(content.filter((item) => isPublishedArticle(item)).map(publicArticle));
     } catch (error) {
       console.error("Error fetching content:", error);
       res.status(500).json({ message: "Failed to fetch content" });
@@ -1276,20 +1294,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/content/:slug', async (req, res) => {
     try {
       const content = await getStorage().getContentItemBySlug(req.params.slug);
-      if (!content) {
+      if (!content || !isPublishedArticle(content)) {
         return res.status(404).json({ message: "Content not found" });
       }
-      res.json(content);
+      res.json(publicArticle(content));
     } catch (error) {
       console.error("Error fetching content:", error);
       res.status(500).json({ message: "Failed to fetch content" });
     }
   });
 
+  app.get('/api/admin/content', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (_req, res, next) => {
+    try { res.json(await getStorage().getContentItems()); } catch (error) { next(error); }
+  });
+
   app.post('/api/admin/content', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const content = await getStorage().createContentItem({ ...contentCreateSchema.parse(req.body), authorId: userId });
+      const data = contentCreateSchema.parse(req.body);
+      const content = await getStorage().createContentItem({ ...data, authorId: userId, publishedAt: data.status === 'published' ? new Date() : null });
       res.status(201).json(content);
     } catch (error) {
       console.error("Error creating content:", error);
@@ -1299,7 +1322,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/admin/content/:id', authenticateToken, requirePermission(PERMISSIONS.CONTENT_MANAGE), async (req, res) => {
     try {
-      const content = await getStorage().updateContentItem(req.params.id, contentUpdateSchema.parse(req.body));
+      const data = contentUpdateSchema.parse(req.body);
+      const content = await getStorage().updateContentItem(req.params.id, { ...data, ...(data.status === 'published' ? { publishedAt: new Date() } : {}) });
       res.json(content);
     } catch (error) {
       console.error("Error updating content:", error);
@@ -1592,7 +1616,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/inventory/scan', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_MANAGE), async (req, res) => {
     try {
-      const alerts = await inventoryIntelligenceService.scanInventory();
+      const global = ['system_administrator', 'super_administrator'].includes(normalizeHealthcareRole(req.user!.role) ?? '');
+      if (!global && !req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+      const alerts = await inventoryIntelligenceService.scanInventory(global ? undefined : req.user!.branchId!);
       await inventoryIntelligenceService.notifyCriticalAlerts(alerts);
       await recordAuditEvent(req, { action: 'inventory.scan', entityType: 'inventory', changes: { alertCount: alerts.length } });
       res.json({ success: true, data: { alerts } });
@@ -1603,38 +1629,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get('/api/inventory/alerts', authenticateToken, requirePermission(PERMISSIONS.INVENTORY_READ), (_req, res) => {
-    res.json({ success: true, data: inventoryIntelligenceService.getDashboardAlerts() });
+    const global = ['system_administrator', 'super_administrator'].includes(normalizeHealthcareRole(_req.user!.role) ?? '');
+    if (!global && !_req.user!.branchId) return res.status(403).json({ message: 'Branch assignment required' });
+    res.json({ success: true, data: inventoryIntelligenceService.getDashboardAlerts().filter((alert) => global || alert.branchId === _req.user!.branchId) });
   });
+
+  registerIntelligenceApi(app);
 
   app.get('/api/engineering/control-center', authenticateToken, requirePermission(PERMISSIONS.SYSTEM_CONFIGURE), async (_req, res) => {
     const auditLogs = await getStorage().getAuditLogs(50);
     const notificationJobs = notificationService.getQueueStatus();
     const inventoryAlerts = inventoryIntelligenceService.getDashboardAlerts();
-    const modules = {
-      security: { completed: 8, pending: 1, blocked: 0 },
-      inventory: { completed: inventoryAlerts.length > 0 ? 4 : 3, pending: inventoryAlerts.length > 0 ? 0 : 1, blocked: 0 },
-      notifications: { completed: 7, pending: 0, blocked: 0 },
-      performance: { completed: 4, pending: 2, blocked: 0 },
-      clinicalTools: { completed: 5, pending: 1, blocked: 0 },
-    };
-    const completed = Object.values(modules).reduce((sum, module) => sum + module.completed, 0);
-    const pending = Object.values(modules).reduce((sum, module) => sum + module.pending, 0);
-    const blocked = Object.values(modules).reduce((sum, module) => sum + module.blocked, 0);
-    const readinessScore = Math.round((completed / Math.max(completed + pending + blocked, 1)) * 100);
-
     res.json({
       success: true,
       data: {
-        priorityProgress: { P0: 75, P1: 60, P2: 35, P3: 15 },
-        modules,
-        metrics: { completed, pending, inProgress: notificationJobs.filter((job) => job.status === 'processing').length, blocked, readinessScore },
-        riskHeatmap: {
-          critical: auditLogs.filter((log) => log.action.includes('clinical.override')).length,
-          high: inventoryAlerts.filter((alert) => alert.severity === 'high').length,
-          moderate: inventoryAlerts.filter((alert) => alert.severity === 'moderate').length,
-        },
-        burndown: [{ week: 'current', completed, pending }],
-        weeklyReport: `Deployment readiness ${readinessScore}%. ${inventoryAlerts.length} inventory alerts and ${notificationJobs.length} notification jobs tracked.`,
+        scope: 'process_observations_only',
+        priorityProgress: null, modules: null,
+        metrics: { readinessScore: null, completed: null, pending: null, blocked: null,
+          inProgress: notificationJobs.filter((job) => job.status === 'processing').length },
+        observed: { recentAuditEvents: auditLogs.length, inventoryAlerts: inventoryAlerts.length, notificationJobs: notificationJobs.length },
+        riskHeatmap: null, burndown: [],
+        weeklyReport: 'Release readiness has not been certified. Counts are current process observations, not completion percentages or durable delivery evidence.',
       },
     });
   });

@@ -289,11 +289,15 @@ export class MemoryStorage implements IStorage {
     }
   }
 
-  async getStockMovements(filters: { batchId?: string; branchId?: string } = {}): Promise<StockMovement[]> {
+  async getStockMovements(filters: import('./storage').StockMovementFilters = {}): Promise<StockMovement[]> {
     const movements = this.stockMovements.filter((movement) =>
       (!filters.batchId || movement.batchId === filters.batchId)
-      && (!filters.branchId || movement.branchId === filters.branchId));
-    return [...movements].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      && (!filters.branchId || movement.branchId === filters.branchId)
+      && (!filters.productId || movement.productId === filters.productId)
+      && (!filters.since || movement.createdAt >= filters.since)
+      && (!filters.until || movement.createdAt < filters.until));
+    const sorted = [...movements].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return filters.limit ? sorted.slice(0, filters.limit) : sorted;
   }
 
   async getOrderForOwner(id: string, ownerId: string): Promise<Order | undefined> {
@@ -993,12 +997,20 @@ export class MemoryStorage implements IStorage {
     }
   }
 
-  async getDashboardStats(): Promise<any> {
+  async getDashboardStats(branchId?: string): Promise<any> {
+    const orders = [...this.orders.values()].filter((o) => !branchId || o.branchId === branchId);
+    const batches = [...this.stockBatches.values()].filter((b) => (!branchId || b.branchId === branchId) && b.status === 'active' && new Date(b.expiryDate).getTime() > Date.now());
     return {
-      totalOrders: this.orders.size,
-      totalRevenue: Array.from(this.orders.values()).reduce((sum, o) => sum + parseFloat(o.total || '0'), 0),
-      totalUsers: this.users.size,
-      totalProducts: this.products.size,
+      scope: branchId ? 'assigned_branch' : 'system',
+      totalOrders: orders.length,
+      totalRevenue: branchId ? null : orders.filter((o) => o.paymentStatus === 'completed').reduce((sum, o) => sum + parseFloat(o.total || '0'), 0),
+      totalCustomers: branchId ? null : [...this.users.values()].filter((u) => u.role === 'patient').length,
+      totalProducts: branchId ? null : [...this.products.values()].filter((p) => p.isActive).length,
+      lowStockItems: batches.filter((b) => b.quantityOnHand - b.quantityReserved <= 10).length,
+      expiringItems: batches.filter((b) => new Date(b.expiryDate).getTime() <= Date.now() + 30 * 86_400_000).length,
+      pendingPrescriptions: branchId ? null : [...this.prescriptions.values()].filter((p) => p.status === 'pending').length,
+      activeDeliveries: [...this.deliveries.values()].filter((d) => orders.some((o) => o.id === d.orderId) && ['assigned','picked_up','in_transit'].includes(d.status)).length,
+      revenueGrowth: null, ordersGrowth: null,
     };
   }
 }

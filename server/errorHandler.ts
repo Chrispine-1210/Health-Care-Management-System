@@ -1,6 +1,4 @@
-/**
- * Comprehensive Error Handler
- */
+import { logger } from './logger';
 
 export class AppError extends Error {
   constructor(
@@ -45,22 +43,29 @@ export class ConflictError extends AppError {
 
 // Handler middleware
 export const globalErrorHandler = (err: any, _req: any, res: any, _next: any) => {
+  if (res.headersSent) return _next(err);
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       success: false,
       error: {
         message: err.message,
         code: err.code,
+        requestId: res.locals.requestId,
       },
     });
   }
 
-  console.error('Unhandled error:', err);
+  const parserError = err?.type === 'entity.parse.failed' || err?.type === 'entity.too.large';
+  if (parserError) return res.status(err.type === 'entity.too.large' ? 413 : 400).json({
+    success: false, error: { message: err.type === 'entity.too.large' ? 'Request body too large' : 'Invalid JSON request', code: 'INVALID_REQUEST', requestId: res.locals.requestId },
+  });
+  logger.error('Unhandled request error', { requestId: res.locals.requestId, category: 'internal' });
   res.status(500).json({
     success: false,
     error: {
       message: 'Internal server error',
       code: 'INTERNAL_ERROR',
+      requestId: res.locals.requestId,
     },
   });
 };

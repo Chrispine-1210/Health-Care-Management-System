@@ -162,6 +162,7 @@ See [Project Governance](docs/PROJECT_GOVERNANCE.md) for priorities, board state
 - [Project governance](docs/PROJECT_GOVERNANCE.md)
 - [Changelog](CHANGELOG.md)
 - [Finalization evidence — 18 November 2026](docs/FINALIZATION_2026-11-18.md)
+- [Public site, prediction mathematics and reliability boundaries](docs/PUBLIC_SITE_AND_PREDICTIVE_SYSTEM_2026-11-18.md)
 
 ## Responsible use
 

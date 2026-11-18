@@ -58,6 +58,7 @@ export interface ReleasedReservation {
   batchId: string;
   quantityReleased: number;
 }
+export interface StockMovementFilters { batchId?: string; branchId?: string; productId?: string; since?: Date; until?: Date; limit?: number; }
 
 export interface OrderCancellationResult {
   order: Order;
@@ -106,7 +107,7 @@ export interface IStorage {
   createStockBatchWithAudit(batch: InsertStockBatch, audit: InsertAuditLog): Promise<StockBatch>;
   updateStockBatchWithAudit(id: string, branchId: string, batch: Partial<InsertStockBatch>, audit: InsertAuditLog): Promise<StockBatch | undefined>;
   adjustStockBatchWithAudit(id: string, branchId: string, quantityDelta: number, reason: string, audit: InsertAuditLog): Promise<StockBatch | undefined>;
-  getStockMovements(filters?: { batchId?: string; branchId?: string }): Promise<StockMovement[]>;
+  getStockMovements(filters?: StockMovementFilters): Promise<StockMovement[]>;
 
   // Order operations
   getAllOrdersForOperations(): Promise<Order[]>;
@@ -181,7 +182,7 @@ export interface IStorage {
   reviewEmergencyAccessGrantWithAudit(id: string, changes: Partial<InsertEmergencyAccessGrant>, audit: InsertAuditLog): Promise<EmergencyAccessGrant | undefined>;
 
   // Analytics/Stats
-  getDashboardStats(): Promise<any>;
+  getDashboardStats(branchId?: string): Promise<any>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -441,14 +442,16 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getStockMovements(filters: { batchId?: string; branchId?: string } = {}): Promise<StockMovement[]> {
+  async getStockMovements(filters: StockMovementFilters = {}): Promise<StockMovement[]> {
     const conditions = [
       ...(filters.batchId ? [eq(stockMovements.batchId, filters.batchId)] : []),
       ...(filters.branchId ? [eq(stockMovements.branchId, filters.branchId)] : []),
+      ...(filters.productId ? [eq(stockMovements.productId, filters.productId)] : []),
+      ...(filters.since ? [gte(stockMovements.createdAt, filters.since)] : []),
+      ...(filters.until ? [lt(stockMovements.createdAt, filters.until)] : []),
     ];
-    return conditions.length
-      ? await db.select().from(stockMovements).where(and(...conditions)).orderBy(desc(stockMovements.createdAt))
-      : await db.select().from(stockMovements).orderBy(desc(stockMovements.createdAt));
+    const query = db.select().from(stockMovements).where(and(...conditions)).orderBy(desc(stockMovements.createdAt));
+    return filters.limit ? await query.limit(filters.limit) : await query;
   }
 
   async getProductBySku(sku: string): Promise<Product | undefined> {
@@ -1120,7 +1123,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Analytics/Stats
-  async getDashboardStats(): Promise<any> {
+  async getDashboardStats(branchId?: string): Promise<any> {
+    if (branchId) {
+      const [orderStats, low, expiring, activeDeliveries] = await Promise.all([
+        db.select({ totalOrders: sql<number>`count(*)` }).from(orders).where(eq(orders.branchId, branchId)),
+        db.select({ count: sql<number>`count(*)` }).from(stockBatches).where(and(eq(stockBatches.branchId, branchId), eq(stockBatches.status, 'active'), gt(stockBatches.expiryDate, new Date()), lte(sql`${stockBatches.quantityOnHand} - ${stockBatches.quantityReserved}`, 10))),
+        db.select({ count: sql<number>`count(*)` }).from(stockBatches).where(and(eq(stockBatches.branchId, branchId), eq(stockBatches.status, 'active'), gte(stockBatches.expiryDate, new Date()), lte(stockBatches.expiryDate, new Date(Date.now() + 30 * 86_400_000)))),
+        db.select({ count: sql<number>`count(*)` }).from(deliveries).innerJoin(orders,eq(deliveries.orderId,orders.id)).where(and(eq(orders.branchId,branchId), sql`${deliveries.status} IN ('assigned', 'picked_up', 'in_transit')`)),
+      ]);
+      return { scope: 'assigned_branch', totalOrders: orderStats[0]?.totalOrders ?? 0, lowStockItems: low[0]?.count ?? 0, expiringItems: expiring[0]?.count ?? 0, activeDeliveries: activeDeliveries[0]?.count ?? 0,
+        totalRevenue: null, totalCustomers: null, totalProducts: null, pendingPrescriptions: null, revenueGrowth: null, ordersGrowth: null };
+    }
     // Get total orders
     const totalOrders = await db.select({ count: sql<number>`count(*)` }).from(orders);
     
@@ -1162,8 +1175,8 @@ export class DatabaseStorage implements IStorage {
       expiringItems: expiringItems[0]?.count || 0,
       pendingPrescriptions: pendingPrescriptions[0]?.count || 0,
       activeDeliveries: activeDeliveries[0]?.count || 0,
-      revenueGrowth: 0, // Would need historical data
-      ordersGrowth: 0, // Would need historical data
+      revenueGrowth: null,
+      ordersGrowth: null,
     };
   }
 }

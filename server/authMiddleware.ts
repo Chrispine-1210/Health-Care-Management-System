@@ -28,6 +28,7 @@ declare global {
  * Extract and validate JWT from Authorization header
  */
 export const authenticateToken = async (req: Request, res: Response, next: NextFunction) => {
+  try {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
@@ -60,6 +61,9 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
   req.authToken = token;
 
   next();
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**

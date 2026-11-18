@@ -10,16 +10,16 @@ import { z } from 'zod';
  */
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().max(254).email(),
+  password: z.string().min(1).max(256),
 });
 
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(12),
+  email: z.string().max(254).email(),
+  password: z.string().min(12).max(256),
   role: z.enum(['customer', 'driver']).default('customer'),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
 });
 
 const adminRegisterSchema = registerSchema.extend({
