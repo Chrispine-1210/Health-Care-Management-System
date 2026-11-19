@@ -17,6 +17,8 @@ function productionEnv(): NodeJS.ProcessEnv {
 test('branch database selection overrides project integration defaults in API and migrations', () => {
   const env = { ...productionEnv(), VERCEL: '1', POSTGRES_URL: 'postgresql://project-default' };
   assert.equal(resolveDatabaseUrl(env), env.DATABASE_URL);
+  assert.equal(resolveDatabaseUrl({ ...env, THANDIZO_DATABASE_URL: ' explicit-rotated-value ' }), 'explicit-rotated-value');
+  assert.equal(resolveDatabaseUrl({ ...env, THANDIZO_DATABASE_URL: ' ' }), env.DATABASE_URL);
   assert.equal(resolveDatabaseUrl({ POSTGRES_URL: env.POSTGRES_URL }), env.POSTGRES_URL);
   assert.equal(resolveDatabaseUrl({ DATABASE_URL: ' ', POSTGRES_URL: ' fallback ' }), 'fallback');
   assert.equal(resolveDatabaseUrl({}), undefined);
