@@ -1,4 +1,5 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
+import { lazy, Suspense } from 'react';
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,55 +9,55 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/contexts/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
-import NotFound from "@/pages/not-found";
+import { getPostLoginRoute } from '@/lib/authSession';
+const NotFound = lazy(() => import('@/pages/not-found'));
 import Landing from "@/pages/landing-redesigned";
-import LoginNew from "@/pages/login-new";
-import SignupNew from "@/pages/signup-new";
-import DebugTest from "@/pages/debug-test";
-import EmailDemo from "@/pages/email-demo";
-import CustomerHome from "@/pages/customer/home";
-import SignInDemo from "@/pages/auth/sign-in-updated";
-import SignUp from "@/pages/auth/sign-up";
-import CustomerShop from "@/pages/customer/shop";
-import CustomerOrders from "@/pages/customer/orders";
-import CustomerOrderDetail from "@/pages/customer/order-detail";
-import CustomerPrescriptions from "@/pages/customer/prescriptions";
-import CustomerProfile from "@/pages/customer/profile";
-import ProfileEditPage from "@/pages/customer/profile-edit";
-import CartPage from "@/pages/customer/cart";
-import CheckoutPage from "@/pages/customer/checkout";
-import ConsultationsPage from "@/pages/customer/consultations";
-import RoleTester from "@/pages/role-tester";
-import RoleTestDashboard from "@/pages/role-test-dashboard";
-import AdminDashboard from "@/pages/admin/dashboard";
-import AdminInventory from "@/pages/admin/inventory";
-import AdminUsersPage from "@/pages/admin/users";
-import AdminBranches from "@/pages/admin/branches";
-import AdminProducts from "@/pages/admin/products";
-import AdminOrders from "@/pages/admin/orders";
-import AdminAnalytics from "@/pages/admin/analytics";
-import AdminContent from "@/pages/admin/content";
-import AdminSettings from "@/pages/admin/settings";
-import PharmacistDashboard from "@/pages/pharmacist/dashboard-new";
-import PharmacistPrescriptions from "@/pages/pharmacist/prescriptions";
-import PharmacistInventory from "@/pages/pharmacist/inventory";
-import StaffDashboard from "@/pages/staff/dashboard-new";
-import StaffOrders from "@/pages/staff/orders";
-import DriverDashboard from "@/pages/driver/dashboard-new";
-import DriverHistory from "@/pages/driver/history";
-import POSPage from "@/pages/pos";
-import NationalIDVerification from "@/pages/verification/national-id";
-import FaceScanVerification from "@/pages/verification/face-scan";
-import PhoneOTPVerification from "@/pages/verification/phone-otp";
-import DriverPerformance from "@/pages/performance/driver-performance";
-import PharmacistPerformance from "@/pages/performance/pharmacist-performance";
-import StaffPerformance from "@/pages/performance/staff-performance";
-import AdminPerformance from "@/pages/performance/admin-performance";
-import AccountSettings from "@/pages/settings/account-settings";
-import DriverPortfolio from "@/pages/portfolio/driver-portfolio";
-import PharmacistPortfolio from "@/pages/portfolio/pharmacist-portfolio";
-import CustomerPortfolioProfile from "@/pages/portfolio/customer-profile";
-import { ChatWidget } from "@/components/ChatWidget";
+const PublicPages = lazy(() => import('@/pages/public-pages'));
+const Intelligence = lazy(() => import('@/pages/admin/intelligence'));
+const LoginNew = lazy(() => import('@/pages/login-new'));
+const SignupNew = lazy(() => import('@/pages/signup-new'));
+const DebugTest = lazy(() => import('@/pages/debug-test'));
+const EmailDemo = lazy(() => import('@/pages/email-demo'));
+const CustomerHome = lazy(() => import('@/pages/customer/home'));
+const CustomerShop = lazy(() => import('@/pages/customer/shop'));
+const CustomerOrders = lazy(() => import('@/pages/customer/orders'));
+const CustomerOrderDetail = lazy(() => import('@/pages/customer/order-detail'));
+const CustomerPrescriptions = lazy(() => import('@/pages/customer/prescriptions'));
+const CustomerProfile = lazy(() => import('@/pages/customer/profile'));
+const ProfileEditPage = lazy(() => import('@/pages/customer/profile-edit'));
+const CartPage = lazy(() => import('@/pages/customer/cart'));
+const CheckoutPage = lazy(() => import('@/pages/customer/checkout'));
+const ConsultationsPage = lazy(() => import('@/pages/customer/consultations'));
+const RoleTester = lazy(() => import('@/pages/role-tester'));
+const RoleTestDashboard = lazy(() => import('@/pages/role-test-dashboard'));
+const AdminDashboard = lazy(() => import('@/pages/admin/dashboard'));
+const AdminInventory = lazy(() => import('@/pages/admin/inventory'));
+const AdminUsersPage = lazy(() => import('@/pages/admin/users'));
+const AdminBranches = lazy(() => import('@/pages/admin/branches'));
+const AdminProducts = lazy(() => import('@/pages/admin/products'));
+const AdminOrders = lazy(() => import('@/pages/admin/orders'));
+const AdminAnalytics = lazy(() => import('@/pages/admin/analytics'));
+const AdminContent = lazy(() => import('@/pages/admin/content'));
+const AdminSettings = lazy(() => import('@/pages/admin/settings'));
+const PharmacistDashboard = lazy(() => import('@/pages/pharmacist/dashboard-new'));
+const PharmacistPrescriptions = lazy(() => import('@/pages/pharmacist/prescriptions'));
+const PharmacistInventory = lazy(() => import('@/pages/pharmacist/inventory'));
+const StaffDashboard = lazy(() => import('@/pages/staff/dashboard-new'));
+const StaffOrders = lazy(() => import('@/pages/staff/orders'));
+const DriverDashboard = lazy(() => import('@/pages/driver/dashboard-new'));
+const DriverHistory = lazy(() => import('@/pages/driver/history'));
+const POSPage = lazy(() => import('@/pages/pos'));
+const NationalIDVerification = lazy(() => import('@/pages/verification/national-id'));
+const FaceScanVerification = lazy(() => import('@/pages/verification/face-scan'));
+const PhoneOTPVerification = lazy(() => import('@/pages/verification/phone-otp'));
+const DriverPerformance = lazy(() => import('@/pages/performance/driver-performance'));
+const PharmacistPerformance = lazy(() => import('@/pages/performance/pharmacist-performance'));
+const StaffPerformance = lazy(() => import('@/pages/performance/staff-performance'));
+const AdminPerformance = lazy(() => import('@/pages/performance/admin-performance'));
+const AccountSettings = lazy(() => import('@/pages/settings/account-settings'));
+const DriverPortfolio = lazy(() => import('@/pages/portfolio/driver-portfolio'));
+const PharmacistPortfolio = lazy(() => import('@/pages/portfolio/pharmacist-portfolio'));
+const CustomerPortfolioProfile = lazy(() => import('@/pages/portfolio/customer-profile'));
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 
@@ -80,7 +81,11 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Router() {
-  const { isAuthenticated, isLoading, isCustomer, isAdmin, isPharmacist, isStaff, isDriver } = useAuth();
+  const { user, isAuthenticated, isLoading, isCustomer, isAdmin, isPharmacist, isStaff, isDriver } = useAuth();
+  const [location] = useLocation();
+
+  if (location === '/welcome') return <Landing />;
+  if (['/services', '/catalogue', '/branches', '/about', '/help', '/contact', '/privacy', '/terms', '/updates'].includes(location) || location.startsWith('/updates/')) return <PublicPages />;
 
   if (isLoading) {
     return (
@@ -90,17 +95,19 @@ function Router() {
     );
   }
 
+  if (isAuthenticated && ['/login','/signup','/sign-in','/sign-up'].includes(location)) return <Redirect to={getPostLoginRoute(user!.role)} />;
+
   // Not authenticated - show landing/login
   if (!isAuthenticated) {
     return (
       <Switch>
-        <Route path="/debug" component={DebugTest} />
-        <Route path="/email-demo" component={EmailDemo} />
+        {import.meta.env.DEV && <Route path="/debug" component={DebugTest} />}
+        {import.meta.env.DEV && <Route path="/email-demo" component={EmailDemo} />}
         <Route path="/" component={Landing} />
         <Route path="/login" component={LoginNew} />
         <Route path="/signup" component={SignupNew} />
-        <Route path="/sign-in" component={SignInDemo} />
-        <Route path="/sign-up" component={SignUp} />
+        <Route path="/sign-in" component={LoginNew} />
+        <Route path="/sign-up" component={SignupNew} />
         <Route>
           <Redirect to="/login" />
         </Route>
@@ -125,16 +132,16 @@ function Router() {
       {isStaff && <Route path="/performance/staff" component={StaffPerformance} />}
       {isAdmin && <Route path="/performance/admin" component={AdminPerformance} />}
       <Route path="/pharmacist/inventory">
-        <AdminLayout><PharmacistInventory /></AdminLayout>
+        {isPharmacist || isAdmin ? <AdminLayout><PharmacistInventory /></AdminLayout> : <NotFound />}
       </Route>
       <Route path="/pharmacist/prescriptions">
-        <AdminLayout><PharmacistPrescriptions /></AdminLayout>
+        {isPharmacist || isAdmin ? <AdminLayout><PharmacistPrescriptions /></AdminLayout> : <NotFound />}
       </Route>
       <Route path="/staff/orders">
-        <AdminLayout><StaffOrders /></AdminLayout>
+        {isStaff || isAdmin ? <AdminLayout><StaffOrders /></AdminLayout> : <NotFound />}
       </Route>
       <Route path="/driver/history">
-        <AdminLayout><DriverHistory /></AdminLayout>
+        {isDriver || isAdmin ? <AdminLayout><DriverHistory /></AdminLayout> : <NotFound />}
       </Route>
     </>
   );
@@ -148,14 +155,6 @@ function Router() {
       {isCustomer && <Route path="/profile/view" component={CustomerPortfolioProfile} />}
     </>
   );
-
-  // Online users for chat
-  const onlineUsers = [
-    { id: "driver-1", name: "Mthunzi", role: "driver", status: "online" as const },
-    { id: "pharma-1", name: "Dr. Banda", role: "pharmacist", status: "online" as const },
-    { id: "staff-1", name: "Gift", role: "staff", status: "online" as const },
-    { id: "admin-1", name: "Admin", role: "admin", status: "online" as const },
-  ];
 
   // Customer routes
   if (isCustomer) {
@@ -172,15 +171,14 @@ function Router() {
           <Route path="/consultations" component={ConsultationsPage} />
           <Route path="/profile" component={CustomerProfile} />
           <Route path="/profile/edit" component={ProfileEditPage} />
-          <Route path="/role-tester" component={RoleTester} />
-          <Route path="/role-test" component={RoleTestDashboard} />
+          {import.meta.env.DEV && <Route path="/role-tester" component={RoleTester} />}
+          {import.meta.env.DEV && <Route path="/role-test" component={RoleTestDashboard} />}
           {verificationRoutes}
           {performanceRoutes}
           {accountRoutes}
           <Route path="/performance/customer" component={CustomerPortfolioProfile} />
           <Route component={NotFound} />
         </Switch>
-        <ChatWidget onlinUsers={onlineUsers} />
       </>
     );
   }
@@ -188,10 +186,11 @@ function Router() {
   return (
     <>
       <Switch>
-        <Route path="/pos" component={POSPage} />
+        <Route path="/pos">{isStaff || isAdmin || isPharmacist ? <POSPage /> : <NotFound />}</Route>
         {/* Role tester accessible to all non-customer authenticated users */}
-        <Route path="/role-tester" component={RoleTester} />
-        <Route path="/role-test" component={RoleTestDashboard} />
+        {import.meta.env.DEV && <Route path="/role-tester" component={RoleTester} />}
+        {import.meta.env.DEV && <Route path="/role-test" component={RoleTestDashboard} />}
+        {(isAdmin || isPharmacist) && <Route path="/intelligence"><AdminLayout><Suspense fallback={<p>Loading planning tools…</p>}><Intelligence /></Suspense></AdminLayout></Route>}
         <Route path="/settings/account" component={AccountSettings} />
         
         {isAdmin && (
@@ -304,14 +303,13 @@ function Router() {
         ) : isDriver ? (
           <AdminLayout><DriverDashboard /></AdminLayout>
         ) : (
-          <AdminLayout><AdminDashboard /></AdminLayout>
+          <NotFound />
         )}
       </Route>
       {verificationRoutes}
       {accountRoutes}
       <Route component={NotFound} />
       </Switch>
-      <ChatWidget onlinUsers={onlineUsers} />
     </>
   );
 }
@@ -330,7 +328,7 @@ export default function App() {
             <SidebarProvider style={style as React.CSSProperties}>
               <Toaster />
               <OfflineIndicator />
-              <Router />
+              <Suspense fallback={<div className="min-h-screen flex items-center justify-center" role="status">Loading Thandizo…</div>}><Router /></Suspense>
             </SidebarProvider>
           </TooltipProvider>
         </ThemeProvider>

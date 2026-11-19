@@ -1,5 +1,15 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient } from '@/lib/queryClient';
+import { queryClient, resolveApiUrl } from '@/lib/queryClient';
+import { getAuthToken } from '@/lib/authSession';
+
+export interface ConversationSummary {
+  id: string;
+  participantIds: string[];
+  lastMessage?: string;
+  updatedAt?: string;
+  unread: number;
+  online: boolean;
+}
 
 /**
  * Notifications hook - Real-time notifications
@@ -9,8 +19,8 @@ export function useNotifications() {
   return useQuery({
     queryKey: ['/api/notifications'],
     queryFn: async () => {
-      const res = await fetch('/api/notifications', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      const res = await fetch(resolveApiUrl('/api/notifications'), {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
       });
       if (!res.ok) throw new Error('Failed to fetch notifications');
       return res.json();
@@ -22,9 +32,9 @@ export function useNotifications() {
 export function useMarkNotificationAsRead() {
   return useMutation({
     mutationFn: async (notificationId: string) => {
-      const res = await fetch(`/api/notifications/${notificationId}/read`, {
+      const res = await fetch(resolveApiUrl(`/api/notifications/${notificationId}/read`), {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
       });
       if (!res.ok) throw new Error('Failed to mark as read');
       return res.json();
@@ -39,8 +49,8 @@ export function useConversations() {
   return useQuery({
     queryKey: ['/api/conversations'],
     queryFn: async () => {
-      const res = await fetch('/api/conversations', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      const res = await fetch(resolveApiUrl('/api/conversations'), {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
       });
       if (!res.ok) throw new Error('Failed to fetch conversations');
       return res.json();
@@ -51,11 +61,11 @@ export function useConversations() {
 export function useSendMessage() {
   return useMutation({
     mutationFn: async (data: { recipientId: string; content: string }) => {
-      const res = await fetch('/api/messages', {
+      const res = await fetch(resolveApiUrl('/api/messages'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Authorization: `Bearer ${getAuthToken()}`,
         },
         body: JSON.stringify(data),
       });

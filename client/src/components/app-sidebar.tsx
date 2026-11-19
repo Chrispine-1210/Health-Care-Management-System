@@ -42,6 +42,7 @@ export function AppSidebar() {
     { title: "Inventory", url: "/admin/inventory", icon: Package },
     { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
     { title: "Analytics", url: "/admin/analytics", icon: BarChart3 },
+    { title: "Inventory intelligence", url: "/intelligence", icon: BarChart3 },
     { title: "Content", url: "/admin/content", icon: FileText },
     { title: "Performance", url: "/performance/admin", icon: BarChart3 },
     { title: "Settings", url: "/admin/settings", icon: Settings },
@@ -51,6 +52,7 @@ export function AppSidebar() {
     { title: "Dashboard", url: "/pharmacist", icon: LayoutDashboard },
     { title: "Prescriptions", url: "/pharmacist/prescriptions", icon: FileCheck },
     { title: "Inventory", url: "/pharmacist/inventory", icon: Package },
+    { title: "Inventory intelligence", url: "/intelligence", icon: BarChart3 },
     { title: "Performance", url: "/performance/pharmacist", icon: BarChart3 },
     { title: "Portfolio", url: "/portfolio/pharmacist", icon: Users },
   ];

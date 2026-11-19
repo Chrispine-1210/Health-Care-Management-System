@@ -19,14 +19,34 @@ import { z } from "zod";
 // ENUMS
 // ============================================================================
 
-export const userRoleEnum = pgEnum('user_role', ['admin', 'pharmacist', 'staff', 'customer', 'driver']);
-export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed']);
-export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'cancelled']);
+export const userRoleEnum = pgEnum('user_role', [
+  'patient',
+  'doctor',
+  'nurse',
+  'pharmacist',
+  'receptionist',
+  'laboratory_staff',
+  'delivery_driver',
+  'branch_administrator',
+  'system_administrator',
+  'super_administrator',
+]);
+export const accountStatusEnum = pgEnum('account_status', ['active', 'disabled', 'locked']);
+export const emergencyReasonEnum = pgEnum('emergency_reason', ['immediate_threat', 'continuity_of_care', 'system_outage']);
+export const emergencyReviewStateEnum = pgEnum('emergency_review_state', ['pending', 'approved', 'rejected', 'closed']);
+export const prescriptionStatusEnum = pgEnum('prescription_status', ['pending', 'under_review', 'approved', 'rejected', 'dispensed', 'partially_dispensed', 'fully_dispensed', 'expired', 'revoked', 'cancelled']);
+export const orderStatusEnum = pgEnum('order_status', ['pending', 'confirmed', 'processing', 'ready', 'in_transit', 'delivered', 'partially_cancelled', 'fully_dispensed', 'cancelled']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'processing', 'completed', 'failed', 'refunded']);
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'airtel_money', 'tnm_mpamba', 'card', 'bank_transfer']);
 export const deliveryStatusEnum = pgEnum('delivery_status', ['pending', 'assigned', 'picked_up', 'in_transit', 'delivered', 'failed']);
 export const appointmentStatusEnum = pgEnum('appointment_status', ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show']);
 export const contentStatusEnum = pgEnum('content_status', ['draft', 'published', 'archived']);
+export const stockBatchStatusEnum = pgEnum('stock_batch_status', ['active', 'quarantined', 'recalled', 'expired', 'damaged', 'returned', 'destroyed']);
+export const stockMovementTypeEnum = pgEnum('stock_movement_type', ['receipt', 'reservation', 'release', 'dispense', 'adjustment', 'transfer_in', 'transfer_out', 'return', 'quarantine', 'destruction']);
+export const reservationStatusEnum = pgEnum('reservation_status', ['active', 'partially_dispensed', 'fully_dispensed', 'partially_released', 'released', 'expired', 'cancelled']);
+export const prescriptionRequirementEnum = pgEnum('prescription_requirement', ['none', 'prescription_required', 'pharmacist_review', 'restricted_online', 'controlled_medicine']);
+export const prescriptionItemStatusEnum = pgEnum('prescription_item_status', ['pending', 'under_review', 'approved', 'partially_approved', 'rejected', 'expired', 'revoked', 'fully_consumed']);
+export const orderItemStatusEnum = pgEnum('order_item_status', ['reserved', 'partially_fulfilled', 'fulfilled', 'cancelled']);
 
 // ============================================================================
 // SESSION TABLE (Required for Replit Auth)
@@ -52,7 +72,8 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: userRoleEnum("role").notNull().default('customer'),
+  role: userRoleEnum("role").notNull().default('patient'),
+  accountStatus: accountStatusEnum("account_status").notNull().default('active'),
   phone: varchar("phone"),
   branchId: varchar("branch_id"),
   // Medical info for customers
@@ -78,6 +99,16 @@ export const usersRelations = relations(users, ({ one, many }) => ({
 
 export type User = typeof users.$inferSelect;
 export type UpsertUser = typeof users.$inferInsert;
+
+export const authCredentials = pgTable("auth_credentials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique(),
+  email: varchar("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type AuthCredential = typeof authCredentials.$inferSelect;
 
 // ============================================================================
 // BRANCHES
@@ -130,6 +161,14 @@ export const products = pgTable("products", {
   dosageForm: varchar("dosage_form", { length: 100 }), // tablet, capsule, syrup, etc.
   strength: varchar("strength", { length: 100 }), // e.g., "500mg"
   prescriptionRequired: boolean("prescription_required").notNull().default(false),
+  prescriptionRequirement: prescriptionRequirementEnum("prescription_requirement").notNull().default('none'),
+  requiresPharmacistApproval: boolean("requires_pharmacist_approval").notNull().default(false),
+  onlineSaleAllowed: boolean("online_sale_allowed").notNull().default(true),
+  controlledMedicine: boolean("controlled_medicine").notNull().default(false),
+  maximumDispensingQuantity: integer("maximum_dispensing_quantity"),
+  prescriptionValidityDays: integer("prescription_validity_days").notNull().default(30),
+  allowPartialDispensing: boolean("allow_partial_dispensing").notNull().default(true),
+  allowGenericSubstitution: boolean("allow_generic_substitution").notNull().default(false),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   imageUrl: text("image_url"),
   storageConditions: text("storage_conditions"),
@@ -166,10 +205,12 @@ export const stockBatches = pgTable("stock_batches", {
   productId: varchar("product_id").notNull(),
   branchId: varchar("branch_id").notNull(),
   batchNumber: varchar("batch_number", { length: 100 }).notNull(),
-  quantity: integer("quantity").notNull().default(0),
+  quantityOnHand: integer("quantity_on_hand").notNull().default(0),
+  quantityReserved: integer("quantity_reserved").notNull().default(0),
   expiryDate: timestamp("expiry_date").notNull(),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).notNull(),
   supplierName: varchar("supplier_name", { length: 255 }),
+  status: stockBatchStatusEnum("status").notNull().default('active'),
   receivedAt: timestamp("received_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -179,7 +220,7 @@ export const stockBatches = pgTable("stock_batches", {
   index("idx_stock_batches_expiry").on(table.expiryDate),
 ]);
 
-export const stockBatchesRelations = relations(stockBatches, ({ one }) => ({
+export const stockBatchesRelations = relations(stockBatches, ({ one, many }) => ({
   product: one(products, {
     fields: [stockBatches.productId],
     references: [products.id],
@@ -188,6 +229,7 @@ export const stockBatchesRelations = relations(stockBatches, ({ one }) => ({
     fields: [stockBatches.branchId],
     references: [branches.id],
   }),
+  movements: many(stockMovements),
 }));
 
 export const insertStockBatchSchema = createInsertSchema(stockBatches).omit({
@@ -198,6 +240,43 @@ export const insertStockBatchSchema = createInsertSchema(stockBatches).omit({
 
 export type StockBatch = typeof stockBatches.$inferSelect;
 export type InsertStockBatch = z.infer<typeof insertStockBatchSchema>;
+
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull(),
+  batchId: varchar("batch_id").notNull(),
+  branchId: varchar("branch_id").notNull(),
+  orderId: varchar("order_id"),
+  orderItemId: varchar("order_item_id"),
+  reservationId: varchar("reservation_id"),
+  movementType: stockMovementTypeEnum("movement_type").notNull(),
+  quantityDelta: integer("quantity_delta").notNull(),
+  balanceAfter: integer("balance_after").notNull(),
+  quantityOnHandBefore: integer("quantity_on_hand_before"),
+  quantityOnHandAfter: integer("quantity_on_hand_after"),
+  quantityReservedBefore: integer("quantity_reserved_before"),
+  quantityReservedAfter: integer("quantity_reserved_after"),
+  reason: text("reason").notNull(),
+  performedBy: varchar("performed_by"),
+  correlationId: varchar("correlation_id", { length: 100 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_stock_movements_batch_created").on(table.batchId, table.createdAt),
+  index("idx_stock_movements_branch_created").on(table.branchId, table.createdAt),
+  index("idx_stock_movements_order").on(table.orderId),
+]);
+
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  product: one(products, { fields: [stockMovements.productId], references: [products.id] }),
+  batch: one(stockBatches, { fields: [stockMovements.batchId], references: [stockBatches.id] }),
+  branch: one(branches, { fields: [stockMovements.branchId], references: [branches.id] }),
+  order: one(orders, { fields: [stockMovements.orderId], references: [orders.id] }),
+  actor: one(users, { fields: [stockMovements.performedBy], references: [users.id] }),
+}));
+
+export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({ id: true, createdAt: true });
+export type StockMovement = typeof stockMovements.$inferSelect;
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
 
 // ============================================================================
 // PRESCRIPTIONS
@@ -211,6 +290,12 @@ export const prescriptions = pgTable("prescriptions", {
   reviewedBy: varchar("reviewed_by"),
   reviewNotes: text("review_notes"),
   reviewedAt: timestamp("reviewed_at"),
+  expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: varchar("revoked_by"),
+  revocationReason: text("revocation_reason"),
+  prescriberName: varchar("prescriber_name", { length: 255 }),
+  facilityName: varchar("facility_name", { length: 255 }),
   // Patient medical context
   patientAllergies: text("patient_allergies").array(),
   patientConditions: text("patient_conditions").array(),
@@ -267,6 +352,11 @@ export const orders = pgTable("orders", {
   // Customer contact
   customerPhone: varchar("customer_phone"),
   notes: text("notes"),
+  cancellationReasonCode: varchar("cancellation_reason_code", { length: 100 }),
+  cancellationReason: text("cancellation_reason"),
+  cancelledBy: varchar("cancelled_by"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancellationIdempotencyKey: varchar("cancellation_idempotency_key", { length: 128 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -314,6 +404,8 @@ export const orderItems = pgTable("order_items", {
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  quantityDispensed: integer("quantity_dispensed").notNull().default(0),
+  status: orderItemStatusEnum("status").notNull().default('reserved'),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -339,6 +431,87 @@ export const insertOrderItemSchema = createInsertSchema(orderItems).omit({
 
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+
+export const inventoryReservations = pgTable("inventory_reservations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(),
+  orderItemId: varchar("order_item_id").notNull(),
+  productId: varchar("product_id").notNull(),
+  batchId: varchar("batch_id").notNull(),
+  branchId: varchar("branch_id").notNull(),
+  quantityReserved: integer("quantity_reserved").notNull(),
+  quantityDispensed: integer("quantity_dispensed").notNull().default(0),
+  quantityReleased: integer("quantity_released").notNull().default(0),
+  status: reservationStatusEnum("status").notNull().default('active'),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_inventory_reservations_order").on(table.orderId),
+  index("idx_inventory_reservations_batch_status").on(table.batchId, table.status),
+]);
+
+export type InventoryReservation = typeof inventoryReservations.$inferSelect;
+
+export const prescriptionOrderItems = pgTable("prescription_order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull(),
+  prescriptionId: varchar("prescription_id").notNull(),
+  orderId: varchar("order_id").notNull(),
+  orderItemId: varchar("order_item_id").notNull().unique(),
+  productId: varchar("product_id").notNull(),
+  prescribedQuantity: integer("prescribed_quantity").notNull(),
+  authorisedQuantity: integer("authorised_quantity").notNull().default(0),
+  dispensedQuantity: integer("dispensed_quantity").notNull().default(0),
+  approvalStatus: prescriptionItemStatusEnum("approval_status").notNull().default('pending'),
+  substitutionAllowed: boolean("substitution_allowed").notNull().default(false),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  rejectionReason: text("rejection_reason"),
+  clinicalNote: text("clinical_note"),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_prescription_order_items_prescription").on(table.prescriptionId),
+  index("idx_prescription_order_items_order").on(table.orderId),
+]);
+export type PrescriptionOrderItem = typeof prescriptionOrderItems.$inferSelect;
+
+export const dispensingRecords = pgTable("dispensing_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull(), orderId: varchar("order_id").notNull(),
+  orderItemId: varchar("order_item_id").notNull(), prescriptionId: varchar("prescription_id"),
+  prescriptionOrderItemId: varchar("prescription_order_item_id"), reservationId: varchar("reservation_id").notNull(),
+  productId: varchar("product_id").notNull(), batchId: varchar("batch_id").notNull(),
+  quantity: integer("quantity").notNull(), dispensedBy: varchar("dispensed_by").notNull(),
+  counsellingCompleted: boolean("counselling_completed").notNull().default(false), dispensingNote: text("dispensing_note"),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull().unique(), correlationId: varchar("correlation_id", { length: 100 }),
+  dispensedAt: timestamp("dispensed_at").notNull().defaultNow(),
+});
+export type DispensingRecord = typeof dispensingRecords.$inferSelect;
+
+export const dispensingReversals = pgTable("dispensing_reversals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dispensingRecordId: varchar("dispensing_record_id").notNull(), branchId: varchar("branch_id").notNull(),
+  orderId: varchar("order_id").notNull(), orderItemId: varchar("order_item_id").notNull(), reservationId: varchar("reservation_id").notNull(),
+  productId: varchar("product_id").notNull(), originalBatchId: varchar("original_batch_id").notNull(), quarantineBatchId: varchar("quarantine_batch_id").notNull(),
+  quantity: integer("quantity").notNull(), reason: text("reason").notNull(), performedBy: varchar("performed_by").notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull().unique(), correlationId: varchar("correlation_id", { length: 100 }),
+  reversedAt: timestamp("reversed_at").notNull().defaultNow(),
+});
+export type DispensingReversal = typeof dispensingReversals.$inferSelect;
+
+export const batchSubstitutions = pgTable("batch_substitutions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull(), orderId: varchar("order_id").notNull(), orderItemId: varchar("order_item_id").notNull(),
+  originalReservationId: varchar("original_reservation_id").notNull(), substituteReservationId: varchar("substitute_reservation_id").notNull(),
+  originalBatchId: varchar("original_batch_id").notNull(), substituteBatchId: varchar("substitute_batch_id").notNull(),
+  quantity: integer("quantity").notNull(), reason: text("reason").notNull(), performedBy: varchar("performed_by").notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull().unique(), correlationId: varchar("correlation_id", { length: 100 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type BatchSubstitution = typeof batchSubstitutions.$inferSelect;
 
 // ============================================================================
 // DELIVERIES
@@ -501,3 +674,25 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+
+export const emergencyAccessGrants = pgTable("emergency_access_grants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  actorId: varchar("actor_id").notNull(),
+  patientId: varchar("patient_id").notNull(),
+  reasonCode: emergencyReasonEnum("reason_code").notNull(),
+  justification: text("justification").notNull(),
+  activatedAt: timestamp("activated_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  reviewState: emergencyReviewStateEnum("review_state").default('pending').notNull(),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+}, (table) => [
+  index("idx_emergency_access_actor_patient").on(table.actorId, table.patientId),
+  index("idx_emergency_access_expiry").on(table.expiresAt),
+  index("idx_emergency_access_review").on(table.reviewState),
+]);
+
+export const insertEmergencyAccessGrantSchema = createInsertSchema(emergencyAccessGrants).omit({ id: true });
+export type EmergencyAccessGrant = typeof emergencyAccessGrants.$inferSelect;
+export type InsertEmergencyAccessGrant = z.infer<typeof insertEmergencyAccessGrantSchema>;

@@ -1,6 +1,6 @@
-# Mtendere Healthcare Production Deployment Runbook
+# Thandizo Healthcare Production Deployment Runbook
 
-This runbook is the production checklist for deploying the Thandizo Healthcare web application for a Mtendere Healthcare custom domain using Vercel for the frontend and Cloudflare for DNS, TLS, and edge security.
+This runbook is the production checklist for deploying the Thandizo Healthcare web application to its custom domain using Vercel for the frontend and Cloudflare for DNS, TLS, and edge security.
 
 ## 1. Deployment architecture
 

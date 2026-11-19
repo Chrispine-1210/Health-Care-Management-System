@@ -24,7 +24,7 @@ export class DeliveryService {
         orderId,
         driverId,
         status: 'assigned',
-        estimatedTime,
+        estimatedDeliveryTime: new Date(Date.now() + estimatedTime * 60_000),
       });
 
       logger.info('Delivery assigned', { deliveryId: delivery.id, driverId, orderId });

@@ -9,6 +9,19 @@ interface LogEntry {
   requestId?: string;
 }
 
+const REDACTED = '[REDACTED]';
+const SENSITIVE_LOG_KEY = /authorization|cookie|password|token|secret|database_url|connection|string|medical|clinical|diagnosis|allerg|card|bank/i;
+
+export function redactLogValue(value: unknown, key = ''): unknown {
+  if (SENSITIVE_LOG_KEY.test(key)) return REDACTED;
+  if (typeof value === 'string' && /(?:postgres(?:ql)?|mysql|mongodb):\/\//i.test(value)) return REDACTED;
+  if (Array.isArray(value)) return value.map((item) => redactLogValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, redactLogValue(childValue, childKey)]));
+  }
+  return value;
+}
+
 class Logger {
   private logs: LogEntry[] = [];
   private maxLogs = 10000;
@@ -18,7 +31,7 @@ class Logger {
       timestamp: new Date().toISOString(),
       level,
       message,
-      context,
+      context: context ? redactLogValue(context) as Record<string, any> : undefined,
       userId,
       requestId,
     };
@@ -29,7 +42,7 @@ class Logger {
     }
 
     const prefix = `[${entry.timestamp}] [${level.toUpperCase()}]`;
-    if (level === 'error') console.error(prefix, message, context);
+    if (level === 'error') console.error(prefix, message, entry.context);
     else if (level === 'warn') console.warn(prefix, message);
     else console.log(prefix, message);
   }

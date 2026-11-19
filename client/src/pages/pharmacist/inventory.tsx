@@ -25,7 +25,7 @@ export default function PharmacistInventory() {
 
   if (isLoading) return <div>Loading inventory...</div>;
 
-  const lowStock = batches?.filter(b => b.quantity < 50) || [];
+  const lowStock = batches?.filter(b => b.quantityOnHand - b.quantityReserved < 50) || [];
   const expiringSoon = batches?.filter(b => {
     const expiry = new Date(b.expiryDate);
     const threeMonths = new Date();
@@ -84,10 +84,10 @@ export default function PharmacistInventory() {
                 <TableRow key={batch.id}>
                   <TableCell className="font-medium">{batch.product?.name}</TableCell>
                   <TableCell className="font-mono text-xs">{batch.batchNumber}</TableCell>
-                  <TableCell>{batch.quantity} units</TableCell>
+                  <TableCell>{batch.quantityOnHand - batch.quantityReserved} units</TableCell>
                   <TableCell>{new Date(batch.expiryDate).toLocaleDateString()}</TableCell>
                   <TableCell>
-                    {batch.quantity < 50 ? (
+                    {batch.quantityOnHand - batch.quantityReserved < 50 ? (
                       <Badge variant="destructive">Low Stock</Badge>
                     ) : (
                       <Badge variant="default" className="bg-green-600">Optimal</Badge>

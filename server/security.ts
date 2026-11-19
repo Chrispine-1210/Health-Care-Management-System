@@ -1,12 +1,7 @@
 import type { RequestHandler } from 'express';
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { logger } from './logger';
 
-interface RateLimitStore {
-  [key: string]: { count: number; resetTime: number };
-}
-
-const rateLimitStore: RateLimitStore = {};
 const SENSITIVE_KEYS = new Set(['password', 'token', 'refreshToken', 'accessToken', 'authorization']);
 
 function parseAllowedOrigins() {
@@ -38,19 +33,32 @@ export const corsHeaders: RequestHandler = (req, res, next) => {
 };
 
 export function rateLimit(windowMs = 15 * 60 * 1000, maxRequests = 100): RequestHandler {
+  if (!Number.isFinite(windowMs) || windowMs <= 0 || !Number.isInteger(maxRequests) || maxRequests < 1) throw new RangeError('Invalid rate limit');
+  // Independent budgets per middleware instance; bounded memory. Multi-instance
+  // deployments still require provider/distributed rate limits at the edge.
+  const store = new Map<string, { count: number; resetTime: number }>();
+  let calls = 0;
   return (req, res, next) => {
-    const key = `${req.ip}-${req.path}`;
+    const key = req.ip || 'unknown';
     const now = Date.now();
-
-    if (!rateLimitStore[key] || now > rateLimitStore[key].resetTime) {
-      rateLimitStore[key] = { count: 1, resetTime: now + windowMs };
-      return next();
+    if (++calls % 64 === 0 || store.size >= 10_000) {
+      for (const [id, record] of store) if (record.resetTime <= now) store.delete(id);
     }
-
-    const record = rateLimitStore[key];
+    let record = store.get(key);
+    if (!record || record.resetTime <= now) {
+      if (store.size >= 10_000 && !record) {
+        res.setHeader('Retry-After', '60');
+        return res.status(429).json({ message: 'Request capacity reached; please retry later' });
+      }
+      record = { count: 0, resetTime: now + windowMs };
+      store.set(key, record);
+    }
     record.count++;
+    res.setHeader('RateLimit-Limit', maxRequests);
+    res.setHeader('RateLimit-Remaining', Math.max(0, maxRequests - record.count));
+    res.setHeader('RateLimit-Reset', Math.max(1, Math.ceil((record.resetTime - now) / 1000)));
     if (record.count > maxRequests) {
-      logger.warn('Rate limit exceeded', { ip: req.ip, path: req.path });
+      res.setHeader('Retry-After', Math.max(1, Math.ceil((record.resetTime - now) / 1000)));
       return res.status(429).json({ message: 'Too many requests, please try again later' });
     }
 
@@ -100,13 +108,28 @@ export async function verifyPassword(password: string, hashed: string): Promise<
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export const securityHeaders: RequestHandler = (_req, res, next) => {
+export const securityHeaders: RequestHandler = (req, res, next) => {
+  if (req.path === '/api' || req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('CDN-Cache-Control', 'no-store');
+    res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
+    res.vary('Authorization');
+  }
+  const scriptSource = process.env.NODE_ENV === 'development' ? "'self' 'unsafe-inline'" : "'self'";
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '0');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https: wss:");
+  res.setHeader('Content-Security-Policy', `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; script-src ${scriptSource}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https: wss:`);
+  next();
+};
+
+export const correlationId: RequestHandler = (req, res, next) => {
+  const supplied = req.headers['x-request-id'];
+  const requestId = typeof supplied === 'string' && /^[A-Za-z0-9._-]{8,100}$/.test(supplied) ? supplied : randomUUID();
+  res.locals.requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
   next();
 };

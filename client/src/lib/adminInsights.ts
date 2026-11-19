@@ -97,7 +97,7 @@ export class AdminInsightsService {
     const now = new Date();
     const expiringThreshold = addDays(now, 30);
 
-    const lowStock = stockBatches.filter((batch) => batch.quantity <= 10).length;
+    const lowStock = stockBatches.filter((batch) => batch.quantityOnHand - batch.quantityReserved <= 10).length;
     const expired = stockBatches.filter((batch) => {
       const expiryDate = asDate(batch.expiryDate);
       return expiryDate ? expiryDate < now : false;
@@ -142,7 +142,7 @@ export class AdminInsightsService {
           orders: branchOrders.length,
           activeOrders: branchOrders.filter((order) => activeOrderStatuses.has(order.status)).length,
           revenue: branchOrders.reduce((sum, order) => sum + Number(order.total || 0), 0),
-          lowStock: branchBatches.filter((batch) => batch.quantity <= 10).length,
+          lowStock: branchBatches.filter((batch) => batch.quantityOnHand - batch.quantityReserved <= 10).length,
         };
       })
       .sort((left, right) => right.orders - left.orders);

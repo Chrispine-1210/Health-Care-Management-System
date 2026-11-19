@@ -5,6 +5,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useNotifications, useMarkNotificationAsRead } from '@/hooks/useNotifications';
 import { Bell, CheckCircle, AlertCircle } from 'lucide-react';
 
+type NotificationItem = { id: string; type: string; read: boolean; title?: string; message?: string };
+
 export default function NotificationsPage() {
   const { data: notificationsData, isLoading } = useNotifications();
   const markAsRead = useMarkNotificationAsRead();
@@ -12,7 +14,7 @@ export default function NotificationsPage() {
 
   if (isLoading) return <LoadingSpinner text="Loading notifications..." />;
 
-  const notifications = notificationsData?.data || [];
+  const notifications: NotificationItem[] = notificationsData?.data || [];
   const filteredNotifications = filter === 'unread' ? notifications.filter(n => !n.read) : notifications;
 
   const getIcon = (type: string) => {

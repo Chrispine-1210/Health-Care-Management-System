@@ -20,8 +20,9 @@ interface PaymentResponse {
 export class MalawiPaymentGateway {
   private apiKey: string;
   private environment: 'sandbox' | 'production';
+  private transactions = new Map<string, string>();
 
-  constructor(apiKey: string = process.env.PAYMENT_API_KEY || '', environment: 'sandbox' | 'production' = 'sandbox') {
+  constructor(apiKey: string = process.env.PAYMENT_API_KEY || '', environment: 'sandbox' | 'production' = process.env.NODE_ENV === 'production' ? 'production' : 'sandbox') {
     this.apiKey = apiKey;
     this.environment = environment;
   }
@@ -32,17 +33,20 @@ export class MalawiPaymentGateway {
     if (!phoneNumber) {
       return { success: false, message: 'Invalid Malawi phone number', status: 'failed' };
     }
+    if (this.environment === 'production') {
+      return { success: false, message: 'Payment provider integration unavailable', status: 'failed' };
+    }
 
     try {
       switch (request.method) {
         case 'airtel_money':
-          return await this.processAirtelMoney(request, phoneNumber);
+          return this.track(request.orderId, await this.processAirtelMoney(request, phoneNumber));
         case 'tnm_mpamba':
-          return await this.processTNMMpamba(request, phoneNumber);
+          return this.track(request.orderId, await this.processTNMMpamba(request, phoneNumber));
         case 'card':
-          return await this.processCard(request);
+          return this.track(request.orderId, await this.processCard(request));
         case 'cash':
-          return { success: true, message: 'Cash payment recorded', status: 'pending' };
+          return this.track(request.orderId, { success: true, transactionId: `CASH_${Date.now()}`, message: 'Cash payment recorded', status: 'pending' });
         default:
           return { success: false, message: 'Unsupported payment method', status: 'failed' };
       }
@@ -50,6 +54,15 @@ export class MalawiPaymentGateway {
       console.error('Payment processing error:', error);
       return { success: false, message: 'Payment processing failed', status: 'failed' };
     }
+  }
+
+  private track(orderId: string, response: PaymentResponse): PaymentResponse {
+    if (response.success && response.transactionId) this.transactions.set(response.transactionId, orderId);
+    return response;
+  }
+
+  getTransactionOrderId(transactionId: string): string | undefined {
+    return this.transactions.get(transactionId);
   }
 
   private normalizePhoneNumber(phone: string): string | null {

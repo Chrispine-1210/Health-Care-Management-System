@@ -39,7 +39,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { valid
     return { valid: true, data: result.data };
   }
   const errors: Record<string, string> = {};
-  result.error.errors.forEach(err => {
+  result.error.issues.forEach(err => {
     const path = err.path.join('.');
     errors[path] = err.message;
   });

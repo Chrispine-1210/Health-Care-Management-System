@@ -25,6 +25,10 @@ export function storeAuthenticatedSession(params: {
 }) {
   const { token, refreshToken, user } = params;
 
+  if (getAuthToken() !== token) {
+    void queryClient.cancelQueries();
+    queryClient.clear();
+  }
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   if (refreshToken) {
     localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
@@ -41,7 +45,8 @@ export function storeAuthenticatedSession(params: {
 export function clearAuthenticatedSession() {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
-  queryClient.removeQueries({ queryKey: AUTH_USER_QUERY_PREFIX });
+  void queryClient.cancelQueries();
+  queryClient.clear();
 }
 
 export function getPostLoginRoute(role?: string | null) {

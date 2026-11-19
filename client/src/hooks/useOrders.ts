@@ -1,12 +1,13 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient } from '@/lib/queryClient';
+import { queryClient, resolveApiUrl } from '@/lib/queryClient';
+import { getAuthToken } from '@/lib/authSession';
 
 export function useOrders() {
   return useQuery({
     queryKey: ['/api/orders'],
     queryFn: async () => {
-      const res = await fetch('/api/orders', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      const res = await fetch(resolveApiUrl('/api/orders'), {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
       });
       if (!res.ok) throw new Error('Failed to fetch orders');
       return res.json();
@@ -17,11 +18,11 @@ export function useOrders() {
 export function useCreateOrder() {
   return useMutation({
     mutationFn: async (data: any) => {
-      const res = await fetch('/api/orders', {
+      const res = await fetch(resolveApiUrl('/api/orders'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Authorization: `Bearer ${getAuthToken()}`,
         },
         body: JSON.stringify(data),
       });
@@ -37,11 +38,11 @@ export function useCreateOrder() {
 export function useUpdateOrder() {
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const res = await fetch(`/api/orders/${id}`, {
+      const res = await fetch(resolveApiUrl(`/api/orders/${id}`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Authorization: `Bearer ${getAuthToken()}`,
         },
         body: JSON.stringify(data),
       });
